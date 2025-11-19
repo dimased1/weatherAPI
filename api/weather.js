@@ -1,9 +1,12 @@
 import fetch from 'node-fetch';
-import { InferenceClient } from "@huggingface/inference";
+import OpenAI from 'openai';
 
 const DEFAULT_CITY = 'Edinburgh';
 
-// ===== Получение погоды =====
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
 async function fetchWeather(city, key) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${encodeURIComponent(key)}&q=${encodeURIComponent(city)}&days=1&lang=ru`;
   const res = await fetch(url);
@@ -14,13 +17,11 @@ async function fetchWeather(city, key) {
   return res.json();
 }
 
-// ===== Извлечение ключевых данных =====
 function extractForecast(data) {
   const city = data.location?.name || '';
   const current = data.current || {};
-  const forecastDay = data.forecast?.forecastday?.[0] || {};
-  const day = forecastDay.day || {};
-  const astro = forecastDay.astro || {};
+  const day = data.forecast?.forecastday?.[0]?.day || {};
+  const astro = data.forecast?.forecastday?.[0]?.astro || {};
 
   return {
     city,
@@ -36,69 +37,43 @@ function extractForecast(data) {
   };
 }
 
-// ===== Формируем текст для нейросети =====
-function buildPrompt(obj) {
+function buildPrompt(forecast) {
   return `
-На основе этих данных о погоде составь дружелюбный прогноз для человека.
-Добавь советы: что одеть и взять с собой (зонт, куртку и т.д.).
-Сделай текст интересным и понятным.
+Составь короткий, понятный и дружелюбный прогноз погоды для человека.
+Добавь советы, что одеть и взять с собой.
 Данные:
-Город: ${obj.city}
-Температура: ${obj.temp_c}°C
-Ощущается как: ${obj.feelslike_c}°C
-Влажность: ${obj.humidity}%
-Ветер: ${obj.wind_kph} км/ч ${obj.wind_dir}
-Вероятность осадков: ${obj.chance_of_rain}%
-Условие: ${obj.condition}
-Рассвет: ${obj.sunrise}
-Закат: ${obj.sunset}
+Город: ${forecast.city}
+Температура: ${forecast.temp_c}°C (ощущается как ${forecast.feelslike_c}°C)
+Влажность: ${forecast.humidity}%
+Ветер: ${forecast.wind_kph} км/ч ${forecast.wind_dir}
+Вероятность осадков: ${forecast.chance_of_rain}%
+Условие: ${forecast.condition}
+Рассвет: ${forecast.sunrise}, Закат: ${forecast.sunset}
 `;
 }
 
-// ===== Serverless handler =====
 export default async function handler(req, res) {
-  // ===== CORS =====
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   try {
     const city = req.query?.city || DEFAULT_CITY;
     const weatherKey = process.env.WEATHER_KEY;
-    const hfToken = process.env.HF_API_TOKEN;
-
     if (!weatherKey) return res.status(500).json({ error: 'Missing WEATHER_KEY' });
-    if (!hfToken) return res.status(500).json({ error: 'Missing HF_API_TOKEN' });
 
-    // Получаем погоду
-    const weatherData = await fetchWeather(city, weatherKey);
-    const extracted = extractForecast(weatherData);
-    const prompt = buildPrompt(extracted);
+    const forecastData = await fetchWeather(city, weatherKey);
+    const forecast = extractForecast(forecastData);
+    const prompt = buildPrompt(forecast);
 
-    // ===== HuggingFace Inference =====
-    const client = new InferenceClient(hfToken);
-
-    let hfOutput = '';
-    try {
-      const response = await client.textGeneration({
-        model: "google/flan-t5-small",
-        inputs: prompt,
-        max_new_tokens: 80
-      });
-
-      hfOutput = response.generated_text || '';
-    } catch (e) {
-      console.error("HuggingFace error:", e);
-      // fallback
-      hfOutput = `Погода в ${extracted.city}: ${extracted.condition}. Температура ${extracted.temp_c}°C (ощущается как ${extracted.feelslike_c}°C). Влажность ${extracted.humidity}%. Ветер ${extracted.wind_kph} км/ч ${extracted.wind_dir}. Шанс осадков ${extracted.chance_of_rain}%. Рассвет ${extracted.sunrise}, закат ${extracted.sunset}.`;
-    }
-
-    res.setHeader('Content-Type', 'application/json');
-    res.status(200).json({
-      city: extracted.city,
-      human_forecast: hfOutput.trim()
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 150
     });
+
+    const humanForecast = completion.choices[0].message.content.trim();
+
+    res.status(200).json({ city: forecast.city, human_forecast: humanForecast });
 
   } catch (err) {
     console.error(err);
