@@ -50,7 +50,7 @@ function buildHFInput(obj) {
 
 // ===== Вызов HuggingFace =====
 async function callHuggingFace(text) {
-  const url = 'https://api-inference.huggingface.co/models/google/flan-t5-large';
+  const url = 'https://api-inference.huggingface.co/models/google/flan-t5-small';
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -60,14 +60,13 @@ async function callHuggingFace(text) {
   const body = JSON.stringify({
     inputs: `
 На основе этих данных о погоде, составь живой и дружелюбный прогноз для человека.
-Добавь советы: что одеть, что взять с собой (зонт, куртку и т.д.).
+Добавь советы: что одеть и взять с собой (зонт, куртку и т.д.).
 Сделай текст интересным и понятным.
 Данные:
-${text}
-    `
+${text}`
   });
 
-  const res = await fetch(url, { method: 'POST', headers, body, timeout: 120000 });
+  const res = await fetch(url, { method: 'POST', headers, body, timeout: 60000 });
 
   if (!res.ok) {
     const txt = await res.text();
@@ -75,9 +74,10 @@ ${text}
   }
 
   const json = await res.json();
-  if (Array.isArray(json)) {
-    if (json[0]?.generated_text) return json[0].generated_text;
-    if (typeof json[0] === 'string') return json[0];
+
+  // Модель flan-t5-small возвращает массив с generated_text
+  if (Array.isArray(json) && json[0]?.generated_text) {
+    return json[0].generated_text;
   }
   if (json.generated_text) return json.generated_text;
 
@@ -97,15 +97,17 @@ export default async function handler(req, res) {
     const weatherKey = process.env.WEATHER_KEY;
     if (!weatherKey) return res.status(500).json({ error: 'Missing WEATHER_KEY' });
 
+    // Получаем погоду
     const weatherData = await fetchWeather(city, weatherKey);
     const extracted = extractForecast(weatherData);
     const hfInput = buildHFInput(extracted);
 
+    // Генерируем прогноз через нейросеть
     let hfOutput = '';
     try {
       hfOutput = await callHuggingFace(hfInput);
     } catch (e) {
-      // fallback на обычный текст, если нейросеть не отвечает
+      // fallback если нейросеть не ответила
       hfOutput = `Погода в ${extracted.city}: ${extracted.condition}. Температура ${extracted.temp_c}°C (ощущается как ${extracted.feelslike_c}°C). Влажность ${extracted.humidity}%. Ветер ${extracted.wind_kph} км/ч ${extracted.wind_dir}. Шанс осадков ${extracted.chance_of_rain}%. Рассвет ${extracted.sunrise}, закат ${extracted.sunset}.`;
     }
 
@@ -114,6 +116,7 @@ export default async function handler(req, res) {
       city: extracted.city,
       human_forecast: hfOutput.trim()
     });
+
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
