@@ -91,6 +91,23 @@ async function callHuggingFace(text) {
 
 export default async function handler(req, res) {
   try {
+    export default async function handler(req, res) {
+  // ======= CORS заголовки =======
+  res.setHeader('Access-Control-Allow-Origin', '*'); // любой источник
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Для preflight-запросов (OPTIONS)
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  // ======= конец CORS =======
+
+  try {
+    const city = (req.query?.city || 'Edinburgh');
+    ...
+
     const city = (req.query?.city || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('city')) || DEFAULT_CITY);
     const weatherKey = process.env.WEATHER_KEY;
     if (!weatherKey) {
