@@ -51,7 +51,7 @@ export default async function handler(req, res) {
     // Получение часовых данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
 
-    // Генерация прогноза с помощью GPT-4o Nano
+    // Генерация прогноза с помощью GPT-5-nano
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
 
     return res.status(200).json({ forecast });
@@ -90,7 +90,7 @@ async function fetchWeatherData(apiKey) {
 }
 
 /**
- * Генерирует текст прогноза с помощью GPT-4o Nano
+ * Генерирует текст прогноза с помощью GPT-5-nano
  */
 async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -110,9 +110,7 @@ async function generateForecast(apiKey, weatherData, language) {
           role: "user", 
           content: PROMPTS[language](weatherData) 
         }
-      ],
-      temperature: 0.7,
-      max_tokens: 500
+      ]
     })
   });
 
