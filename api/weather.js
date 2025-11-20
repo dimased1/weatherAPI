@@ -1,5 +1,4 @@
 // /api/weather.js
-// Простая версия без хранилища - генерирует прогноз по запросу
 
 const CITY = "Edinburgh";
 
@@ -9,11 +8,11 @@ const PROMPTS = {
 
 1. Определить дату и день недели и включить их в текст прогноза.
 2. Начать сообщение с приветствия, соответствующего времени суток (например, 'Доброе утро', 'Добрый день', 'Добрый вечер').
-3. Составить развёрнутый и приятный прогноз на день, включая температуру в градусах Цельсия, осадки, скорость ветра в метрах в секунду или километрах в час, влажность и другие важные особенности.
+3. Составить краткий и приятный прогноз на день, включая температуру, осадки, ветер и другие важные особенности. Но не вдаваясь прям в сильные детали. Используй только градусы и метрические единицы. 
 4. Дать совет по выбору одежды в зависимости от погоды.
 5. Упомянуть, если ожидаются изменения в погоде в течение дня (например, дождь после обеда или похолодание к вечеру).
 
-ВАЖНО: Используй только метрическую систему измерений (градусы Цельсия, км/ч, мм осадков). Выведи результат как связный и заботливый текст на русском языке объёмом 2-3 абзаца.
+Выведи результат как один связный и заботливый текст на русском языке на 2-4 абзаца.
 `.trim(),
 
   eng: (weatherData) => `
@@ -21,11 +20,11 @@ Imagine you are a friendly voice assistant telling someone about the weather for
 
 1. Determine the date and day of the week and include them in the forecast.
 2. Start with a greeting appropriate for the time of day (e.g., 'Good morning', 'Good afternoon', 'Good evening').
-3. Create a detailed and pleasant forecast for the day, including temperature in degrees Celsius, precipitation, wind speed in meters per second or kilometers per hour, humidity, and other important features.
+3. Create a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important features.
 4. Give advice on choosing clothing based on the weather.
 5. Mention if there are expected changes in weather during the day (e.g., rain in the afternoon or cooling in the evening).
 
-IMPORTANT: Use only metric system measurements (Celsius, km/h, mm of precipitation). Output the result as one coherent and caring text in English, 2-3 paragraphs long.
+Output the result as one coherent and caring text in English.
 `.trim()
 };
 
@@ -33,12 +32,14 @@ export default async function handler(req, res) {
   try {
     const { WEATHER_KEY, OPENAI_API_KEY } = process.env;
 
+    // Проверка наличия API-ключей
     if (!WEATHER_KEY || !OPENAI_API_KEY) {
       return res.status(500).json({ 
         error: "API keys are not configured" 
       });
     }
 
+    // Получение языка из параметров запроса (по умолчанию ru)
     const language = req.query.lang || 'ru';
     
     if (!PROMPTS[language]) {
@@ -47,22 +48,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // Получаем свежие данные о погоде
+    // Получение часовых данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
-    
-    // Генерируем прогноз
-    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
-    
-    // Формируем ответ
-    const now = new Date();
-    const response = {
-      forecast,
-      lastUpdated: formatDate(now),
-      timestamp: now.getTime(),
-      language
-    };
 
-    return res.status(200).json(response);
+    // Генерация прогноза с помощью GPT-4o Nano
+    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
+
+    return res.status(200).json({ forecast });
 
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
@@ -82,11 +74,14 @@ async function fetchWeatherData(apiKey) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`WeatherAPI error: ${response.status} — ${errorText}`);
+    throw new Error(
+      `WeatherAPI error: ${response.status} — ${errorText}`
+    );
   }
 
   const data = await response.json();
 
+  // Возвращаем структурированные данные с часовым прогнозом
   return {
     location: data.location,
     current: data.current,
@@ -95,7 +90,7 @@ async function fetchWeatherData(apiKey) {
 }
 
 /**
- * Генерирует текст прогноза с помощью GPT-5 Nano
+ * Генерирует текст прогноза с помощью GPT-4o Nano
  */
 async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -116,28 +111,19 @@ async function generateForecast(apiKey, weatherData, language) {
           content: PROMPTS[language](weatherData) 
         }
       ],
-      max_completion_tokens: 500
+      temperature: 0.7,
+      max_tokens: 500
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI API error: ${response.status} — ${errorText}`);
+    throw new Error(
+      `OpenAI API error: ${response.status} — ${errorText}`
+    );
   }
 
   const data = await response.json();
   
   return data.choices?.[0]?.message?.content || "Weather forecast is unavailable";
-}
-
-/**
- * Форматирует дату в формат "20.11 в 15:00"
- */
-function formatDate(date) {
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  
-  return `${day}.${month} в ${hours}:${minutes}`;
 }
