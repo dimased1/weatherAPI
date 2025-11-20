@@ -12,7 +12,7 @@ const PROMPTS = {
 4. Дать совет по выбору одежды в зависимости от погоды.
 5. Упомянуть, если ожидаются изменения в погоде в течение дня (например, дождь после обеда или похолодание к вечеру).
 
-Выведи результат как один связный и заботливый текст на русском языке на 2-3 абзаца.
+Выведи результат как один связный и заботливый текст на русском языке на 2-4 абзаца.
 `.trim(),
 
   eng: (weatherData) => `
@@ -26,20 +26,17 @@ Imagine you are a friendly voice assistant telling someone about the weather for
 
 Output the result as one coherent and caring text in English.
 `.trim()
-};
 
 export default async function handler(req, res) {
   try {
-    const { WEATHER_KEY, OPENAI_API_KEY } = process.env;
+    const { WEATHER_KEY, DEEPSEEK_API_KEY } = process.env;
 
-    // Проверка наличия API-ключей
-    if (!WEATHER_KEY || !OPENAI_API_KEY) {
+    if (!WEATHER_KEY || !DEEPSEEK_API_KEY) {
       return res.status(500).json({ 
         error: "API keys are not configured" 
       });
     }
 
-    // Получение языка из параметров запроса (по умолчанию ru)
     const language = req.query.lang || 'ru';
     
     if (!PROMPTS[language]) {
@@ -48,11 +45,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // Получение часовых данных о погоде
+    // Получение данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
 
-    // Генерация прогноза с помощью GPT-4o Nano
-    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
+    // Создаем краткую сводку вместо полного JSON
+    const weatherSummary = createWeatherSummary(weatherData);
+
+    // Генерация прогноза с помощью DeepSeek
+    const forecast = await generateForecast(DEEPSEEK_API_KEY, weatherSummary, language);
 
     return res.status(200).json({ forecast });
 
@@ -65,7 +65,7 @@ export default async function handler(req, res) {
 }
 
 /**
- * Получает часовые данные о погоде из WeatherAPI
+ * Получает данные о погоде из WeatherAPI
  */
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
@@ -79,47 +79,57 @@ async function fetchWeatherData(apiKey) {
     );
   }
 
-  const data = await response.json();
-
-  // Возвращаем структурированные данные с часовым прогнозом
-  return {
-    location: data.location,
-    current: data.current,
-    forecast: data.forecast.forecastday[0]
-  };
+  return await response.json();
 }
 
 /**
- * Генерирует текст прогноза с помощью GPT-4o Nano
+ * Создает краткую сводку погоды (меньше токенов)
  */
-async function generateForecast(apiKey, weatherData, language) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+function createWeatherSummary(data) {
+  const current = data.current;
+  const forecast = data.forecast.forecastday[0];
+  const day = forecast.day;
+  const hour = new Date().getHours();
+  
+  // Определяем время суток
+  let timeOfDay = 'day';
+  if (hour >= 5 && hour < 12) timeOfDay = 'morning';
+  else if (hour >= 12 && hour < 17) timeOfDay = 'afternoon';
+  else if (hour >= 17 && hour < 22) timeOfDay = 'evening';
+  else timeOfDay = 'night';
+
+  return `Date: ${forecast.date}, ${timeOfDay}. Current: ${current.temp_c}°C, ${current.condition.text}. Day: min ${day.mintemp_c}°C, max ${day.maxtemp_c}°C. Rain chance: ${day.daily_chance_of_rain}%. Wind: ${current.wind_kph} km/h. Humidity: ${current.humidity}%.`;
+}
+
+/**
+ * Генерирует текст прогноза с помощью DeepSeek
+ */
+async function generateForecast(apiKey, weatherSummary, language) {
+  const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-nano",
+      model: "deepseek-chat",
       messages: [
         { 
           role: "system", 
-          content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." 
+          content: "You are a friendly weather assistant. Be brief and warm." 
         },
         { 
           role: "user", 
-          content: PROMPTS[language](weatherData) 
+          content: PROMPTS[language](weatherSummary) 
         }
-      ],
-      temperature: 0.7,
-      max_tokens: 500
+      ]
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `OpenAI API error: ${response.status} — ${errorText}`
+      `DeepSeek API error: ${response.status} — ${errorText}`
     );
   }
 
