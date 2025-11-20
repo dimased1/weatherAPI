@@ -28,7 +28,7 @@ Output the result as one coherent and caring text in English.
 `.trim()
 };
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
       error: err.message || "An unexpected error occurred" 
     });
   }
-};
+}
 
 /**
  * Получает часовые данные о погоде из WeatherAPI
