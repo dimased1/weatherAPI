@@ -100,7 +100,7 @@ async function generateForecast(apiKey, weatherData, language) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: "gpt-5-nano",
       messages: [
         { 
           role: "system", 
