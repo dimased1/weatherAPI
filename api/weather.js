@@ -16,15 +16,15 @@ const PROMPTS = {
 `.trim(),
 
   eng: (weatherData) => `
-Imagine you are a friendly voice assistant telling someone about the weather forecast in a simple, warm, and caring manner. Use the provided JSON weather data (${JSON.stringify(weatherData)}) to:
+Imagine that you are a friendly voice assistant who gives weather forecasts to people in simple, kind language. Use the provided JSON weather data (${JSON.stringify(weatherData)}) to:
 
-1. Determine the date and day of the week and include them in the forecast.
-2. Start with a greeting appropriate for the time of day (e.g., 'Good morning', 'Good afternoon', 'Good evening').
-3. Create a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important features.
-4. Give advice on choosing clothing based on the weather.
-5. Mention if there are expected changes in weather during the day (e.g., rain in the afternoon or cooling in the evening).
+1. Determine the date and day of the week and include them in the forecast text.
+2. Begin the message with a greeting appropriate to the time of day (e.g., 'Good morning,' 'Good afternoon,' 'Good evening.')
+3. Provide a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important factors. However, avoid going into too much detail. Use only degrees and metric units.
+4. Provide clothing advice based on the weather.
+5. Mention if changes in the weather are expected during the day (e.g., rain in the afternoon or a cooler temperature in the evening).
 
-Output the result as one coherent and caring text in English.
+Express the result as a single, coherent text in Russian, 2-3 paragraphs long.
 `.trim()
 };
 
