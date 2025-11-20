@@ -1,5 +1,5 @@
 // /api/weather.js
-// Единый эндпоинт для получения прогнозов и автоматического обновления
+// Простая версия без хранилища - генерирует прогноз по запросу
 
 const CITY = "Edinburgh";
 
@@ -9,11 +9,11 @@ const PROMPTS = {
 
 1. Определить дату и день недели и включить их в текст прогноза.
 2. Начать сообщение с приветствия, соответствующего времени суток (например, 'Доброе утро', 'Добрый день', 'Добрый вечер').
-3. Составить краткий и приятный прогноз на день, включая температуру, осадки, ветер и другие важные особенности. Используй метрические данные. Цельсии 
+3. Составить развёрнутый и приятный прогноз на день, включая температуру в градусах Цельсия, осадки, скорость ветра в метрах в секунду или километрах в час, влажность и другие важные особенности.
 4. Дать совет по выбору одежды в зависимости от погоды.
 5. Упомянуть, если ожидаются изменения в погоде в течение дня (например, дождь после обеда или похолодание к вечеру).
 
-Выведи результат как один связный и заботливый текст на русском языке на 2-4 абзаца.
+ВАЖНО: Используй только метрическую систему измерений (градусы Цельсия, км/ч, мм осадков). Выведи результат как связный и заботливый текст на русском языке объёмом 2-3 абзаца.
 `.trim(),
 
   eng: (weatherData) => `
@@ -21,11 +21,11 @@ Imagine you are a friendly voice assistant telling someone about the weather for
 
 1. Determine the date and day of the week and include them in the forecast.
 2. Start with a greeting appropriate for the time of day (e.g., 'Good morning', 'Good afternoon', 'Good evening').
-3. Create a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important features.
+3. Create a detailed and pleasant forecast for the day, including temperature in degrees Celsius, precipitation, wind speed in meters per second or kilometers per hour, humidity, and other important features.
 4. Give advice on choosing clothing based on the weather.
 5. Mention if there are expected changes in weather during the day (e.g., rain in the afternoon or cooling in the evening).
 
-Output the result as one coherent and caring text in English.
+IMPORTANT: Use only metric system measurements (Celsius, km/h, mm of precipitation). Output the result as one coherent and caring text in English, 2-3 paragraphs long.
 `.trim()
 };
 
@@ -47,81 +47,28 @@ export default async function handler(req, res) {
       });
     }
 
-    // Проверяем, нужно ли обновить прогноз
-    const updated = await checkAndUpdateForecast(WEATHER_KEY, OPENAI_API_KEY, language);
+    // Получаем свежие данные о погоде
+    const weatherData = await fetchWeatherData(WEATHER_KEY);
+    
+    // Генерируем прогноз
+    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
+    
+    // Формируем ответ
+    const now = new Date();
+    const response = {
+      forecast,
+      lastUpdated: formatDate(now),
+      timestamp: now.getTime(),
+      language
+    };
 
-    // Получаем последний прогноз
-    let latestForecast = await getLatestForecast(language);
-
-    // Если прогноза всё ещё нет - создаём его принудительно
-    if (!latestForecast) {
-      const weatherData = await fetchWeatherData(WEATHER_KEY);
-      const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
-      latestForecast = await saveForecast(forecast, language);
-    }
-
-    return res.status(200).json(latestForecast);
+    return res.status(200).json(response);
 
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
     return res.status(500).json({ 
       error: err.message || "An unexpected error occurred" 
     });
-  }
-}
-
-/**
- * Проверяет, прошёл ли час с последнего обновления, и обновляет прогноз
- */
-async function checkAndUpdateForecast(weatherKey, openaiKey, language) {
-  try {
-    const lastForecast = await getLatestForecast(language);
-    const now = Date.now();
-    const oneHour = 60 * 60 * 1000;
-
-    // Если прогноза нет или прошёл час - обновляем
-    if (!lastForecast || (now - lastForecast.timestamp) >= oneHour) {
-      const weatherData = await fetchWeatherData(weatherKey);
-      const forecast = await generateForecast(openaiKey, weatherData, language);
-      await saveForecast(forecast, language);
-    }
-  } catch (err) {
-    console.error("Ошибка обновления прогноза:", err);
-    // Не бросаем ошибку, чтобы вернуть старый прогноз если есть
-  }
-}
-
-/**
- * Получает последний сохранённый прогноз
- */
-async function getLatestForecast(language) {
-  try {
-    const prefix = `weather:${language}:`;
-    const result = await window.storage.list(prefix, true);
-    
-    if (!result || !result.keys || result.keys.length === 0) {
-      return null;
-    }
-
-    // Получаем все прогнозы
-    const forecastPromises = result.keys.map(async (key) => {
-      try {
-        const data = await window.storage.get(key, true);
-        return data ? JSON.parse(data.value) : null;
-      } catch (err) {
-        return null;
-      }
-    });
-
-    const allForecasts = (await Promise.all(forecastPromises))
-      .filter(f => f !== null);
-
-    // Возвращаем самый свежий
-    return allForecasts.sort((a, b) => b.timestamp - a.timestamp)[0] || null;
-
-  } catch (err) {
-    console.error("Ошибка получения прогноза:", err);
-    return null;
   }
 }
 
@@ -181,28 +128,6 @@ async function generateForecast(apiKey, weatherData, language) {
   const data = await response.json();
   
   return data.choices?.[0]?.message?.content || "Weather forecast is unavailable";
-}
-
-/**
- * Сохраняет прогноз в storage
- */
-async function saveForecast(forecast, language) {
-  const now = new Date();
-  const timestamp = now.getTime();
-  const formattedDate = formatDate(now);
-  
-  const forecastData = {
-    forecast,
-    lastUpdated: formattedDate,
-    timestamp,
-    language
-  };
-
-  // Сохраняем с уникальным ключом по времени
-  const key = `weather:${language}:${timestamp}`;
-  await window.storage.set(key, JSON.stringify(forecastData), true);
-
-  return forecastData;
 }
 
 /**
