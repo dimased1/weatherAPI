@@ -30,14 +30,17 @@ Output the result as one coherent and caring text in English.
 
 module.exports = async function handler(req, res) {
   try {
-    const { WEATHER_KEY, DEEPSEEK_API_KEY } = process.env;
+    const WEATHER_KEY = process.env.WEATHER_KEY;
+    const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
+    // Проверка наличия API-ключей
     if (!WEATHER_KEY || !DEEPSEEK_API_KEY) {
       return res.status(500).json({ 
         error: "API keys are not configured" 
       });
     }
 
+    // Получение языка из параметров запроса (по умолчанию ru)
     const language = req.query.lang || 'ru';
     
     if (!PROMPTS[language]) {
@@ -60,10 +63,10 @@ module.exports = async function handler(req, res) {
       error: err.message || "An unexpected error occurred" 
     });
   }
-}
+};
 
 /**
- * Получает данные о погоде из WeatherAPI
+ * Получает часовые данные о погоде из WeatherAPI
  */
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
