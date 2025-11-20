@@ -112,7 +112,7 @@ async function generateForecast(apiKey, weatherData, language) {
         }
       ],
       temperature: 0.7,
-      max_tokens: 500
+      max_completion_tokens: 500
     })
   });
 
