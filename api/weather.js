@@ -26,8 +26,9 @@ Imagine you are a friendly voice assistant telling someone about the weather for
 
 Output the result as one coherent and caring text in English.
 `.trim()
+};
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     const { WEATHER_KEY, DEEPSEEK_API_KEY } = process.env;
 
@@ -45,14 +46,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // Получение данных о погоде
+    // Получение часовых данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
 
-    // Создаем краткую сводку вместо полного JSON
-    const weatherSummary = createWeatherSummary(weatherData);
-
     // Генерация прогноза с помощью DeepSeek
-    const forecast = await generateForecast(DEEPSEEK_API_KEY, weatherSummary, language);
+    const forecast = await generateForecast(DEEPSEEK_API_KEY, weatherData, language);
 
     return res.status(200).json({ forecast });
 
@@ -79,32 +77,20 @@ async function fetchWeatherData(apiKey) {
     );
   }
 
-  return await response.json();
-}
+  const data = await response.json();
 
-/**
- * Создает краткую сводку погоды (меньше токенов)
- */
-function createWeatherSummary(data) {
-  const current = data.current;
-  const forecast = data.forecast.forecastday[0];
-  const day = forecast.day;
-  const hour = new Date().getHours();
-  
-  // Определяем время суток
-  let timeOfDay = 'day';
-  if (hour >= 5 && hour < 12) timeOfDay = 'morning';
-  else if (hour >= 12 && hour < 17) timeOfDay = 'afternoon';
-  else if (hour >= 17 && hour < 22) timeOfDay = 'evening';
-  else timeOfDay = 'night';
-
-  return `Date: ${forecast.date}, ${timeOfDay}. Current: ${current.temp_c}°C, ${current.condition.text}. Day: min ${day.mintemp_c}°C, max ${day.maxtemp_c}°C. Rain chance: ${day.daily_chance_of_rain}%. Wind: ${current.wind_kph} km/h. Humidity: ${current.humidity}%.`;
+  // Возвращаем структурированные данные с часовым прогнозом
+  return {
+    location: data.location,
+    current: data.current,
+    forecast: data.forecast.forecastday[0]
+  };
 }
 
 /**
  * Генерирует текст прогноза с помощью DeepSeek
  */
-async function generateForecast(apiKey, weatherSummary, language) {
+async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -116,11 +102,11 @@ async function generateForecast(apiKey, weatherSummary, language) {
       messages: [
         { 
           role: "system", 
-          content: "You are a friendly weather assistant. Be brief and warm." 
+          content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." 
         },
         { 
           role: "user", 
-          content: PROMPTS[language](weatherSummary) 
+          content: PROMPTS[language](weatherData) 
         }
       ]
     })
