@@ -9,11 +9,11 @@ const PROMPTS = {
 
 1. Определить дату и день недели и включить их в текст прогноза.
 2. Начать сообщение с приветствия, соответствующего времени суток (например, 'Доброе утро', 'Добрый день', 'Добрый вечер').
-3. Составить краткий и приятный прогноз на день, включая температуру, осадки, ветер и другие важные особенности.
+3. Составить краткий и приятный прогноз на день, включая температуру, осадки, ветер и другие важные особенности. Используй метрические системы и градусы. 
 4. Дать совет по выбору одежды в зависимости от погоды.
 5. Упомянуть, если ожидаются изменения в погоде в течение дня (например, дождь после обеда или похолодание к вечеру).
 
-Выведи результат как один связный и заботливый текст на русском языке.
+Выведи результат как один связный и заботливый текст на русском языке на 2-4 абзаца.
 `.trim(),
 
   eng: (weatherData) => `
@@ -48,15 +48,16 @@ export default async function handler(req, res) {
     }
 
     // Проверяем, нужно ли обновить прогноз
-    await checkAndUpdateForecast(WEATHER_KEY, OPENAI_API_KEY, language);
+    const updated = await checkAndUpdateForecast(WEATHER_KEY, OPENAI_API_KEY, language);
 
     // Получаем последний прогноз
-    const latestForecast = await getLatestForecast(language);
+    let latestForecast = await getLatestForecast(language);
 
+    // Если прогноза всё ещё нет - создаём его принудительно
     if (!latestForecast) {
-      return res.status(404).json({ 
-        error: "No forecast available yet" 
-      });
+      const weatherData = await fetchWeatherData(WEATHER_KEY);
+      const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
+      latestForecast = await saveForecast(forecast, language);
     }
 
     return res.status(200).json(latestForecast);
