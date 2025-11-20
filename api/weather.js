@@ -24,7 +24,7 @@ Imagine that you are a friendly voice assistant who gives weather forecasts to p
 4. Provide clothing advice based on the weather.
 5. Mention if changes in the weather are expected during the day (e.g., rain in the afternoon or a cooler temperature in the evening).
 
-Express the result as a single, coherent text in Russian, 2-3 paragraphs long.
+Express the result as a single, coherent text in english, 2-3 paragraphs long.
 `.trim()
 };
 
