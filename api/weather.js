@@ -12,7 +12,7 @@ const PROMPTS = {
 4. Дать совет по выбору одежды в зависимости от погоды.
 5. Упомянуть, если ожидаются изменения в погоде в течение дня (например, дождь после обеда или похолодание к вечеру).
 
-Выведи результат как один связный и заботливый текст на русском языке на 2-4 абзаца.
+Выведи результат как один связный и заботливый текст на русском языке на 2-3 абзаца.
 `.trim(),
 
   eng: (weatherData) => `
@@ -51,7 +51,7 @@ export default async function handler(req, res) {
     // Получение часовых данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
 
-    // Генерация прогноза с помощью GPT-5-nano
+    // Генерация прогноза с помощью GPT-4o Nano
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
 
     return res.status(200).json({ forecast });
@@ -90,7 +90,7 @@ async function fetchWeatherData(apiKey) {
 }
 
 /**
- * Генерирует текст прогноза с помощью GPT-5-nano
+ * Генерирует текст прогноза с помощью GPT-4o Nano
  */
 async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -100,7 +100,7 @@ async function generateForecast(apiKey, weatherData, language) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-5-nano",
+      model: "gpt-4o-nano",
       messages: [
         { 
           role: "system", 
@@ -110,7 +110,9 @@ async function generateForecast(apiKey, weatherData, language) {
           role: "user", 
           content: PROMPTS[language](weatherData) 
         }
-      ]
+      ],
+      temperature: 0.7,
+      max_tokens: 500
     })
   });
 
