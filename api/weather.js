@@ -62,7 +62,7 @@ export default async function handler(req, res) {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OPENAI_API_KEY}` },
       body: JSON.stringify({
-        model: "gpt-5.1-nano",
+        model: "gpt-5-nano",
         messages: [
           { role: "system", content: "Ты дружелюбный помощник, который пишет прогноз погоды простым языком." },
           { role: "user", content: prompt }
