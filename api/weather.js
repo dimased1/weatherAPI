@@ -106,7 +106,7 @@ async function generateForecast(apiKey, weatherData, language) {
     },
     body: JSON.stringify({
       model: "gpt-5-nano",
-      max_tokens: 150,
+      max_completion_tokens: 150,
       messages: [
         { 
           role: "system", 
