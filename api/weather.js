@@ -124,7 +124,7 @@ async function generateForecast(apiKey, weatherData, language) {
           content: userPrompt
         }
       ],
-      max_output_tokens: 200
+      max_output_tokens: 1000
     })
   });
 
