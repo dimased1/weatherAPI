@@ -103,10 +103,8 @@ async function fetchWeatherData(apiKey) {
  * Генерирует текст прогноза с помощью GPT-5-nano через Responses API
  */
 async function generateForecast(apiKey, weatherData, language) {
-  // Формируем полный промпт для Responses API
   const systemPrompt = "You are a friendly weather assistant who provides forecasts in a warm and caring manner.";
   const userPrompt = PROMPTS[language](weatherData);
-  const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -116,7 +114,16 @@ async function generateForecast(apiKey, weatherData, language) {
     },
     body: JSON.stringify({
       model: "gpt-5-nano",
-      input: fullPrompt,
+      input: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: userPrompt
+        }
+      ],
       max_output_tokens: 200
     })
   });
@@ -130,19 +137,47 @@ async function generateForecast(apiKey, weatherData, language) {
 
   const data = await response.json();
   
-  // Извлекаем текст из разных возможных мест
-  const content = data.output?.content?.text 
-                || data.output?.content 
-                || data.output?.text
-                || data.content?.text
-                || data.content
-                || data.text
-                || data.output;
+  // Логируем полный ответ для отладки
+  console.log("OpenAI full response:", JSON.stringify(data, null, 2));
   
-  if (!content || typeof content !== 'string') {
-    console.error("OpenAI full response:", JSON.stringify(data, null, 2));
-    throw new Error(`Invalid response format. Got: ${JSON.stringify(content)}`);
+  // Извлекаем текст из возможных структур ответа
+  let content = null;
+  
+  // Вариант 1: data.output[0].content.text (массив сообщений)
+  if (data.output && Array.isArray(data.output) && data.output[0]?.content?.text) {
+    content = data.output[0].content.text;
+  }
+  // Вариант 2: data.output.content.text
+  else if (data.output?.content?.text) {
+    content = data.output.content.text;
+  }
+  // Вариант 3: data.output.content (строка)
+  else if (typeof data.output?.content === 'string') {
+    content = data.output.content;
+  }
+  // Вариант 4: data.output.text
+  else if (data.output?.text) {
+    content = data.output.text;
+  }
+  // Вариант 5: data.output (строка)
+  else if (typeof data.output === 'string') {
+    content = data.output;
+  }
+  // Вариант 6: data.content
+  else if (typeof data.content === 'string') {
+    content = data.content;
+  }
+  // Вариант 7: data.text
+  else if (typeof data.text === 'string') {
+    content = data.text;
   }
   
-  return content;
+  if (!content || typeof content !== 'string') {
+    throw new Error(
+      `Invalid response format from OpenAI API. ` +
+      `Expected text content, got: ${JSON.stringify(data)}`
+    );
+  }
+  
+  return content.trim();
 }
