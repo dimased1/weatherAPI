@@ -1,4 +1,4 @@
-// /api/weather.js
+import OpenAI from "openai";
 
 const CITY = "Edinburgh";
 
@@ -20,55 +20,45 @@ Express the result as a single, coherent text in english, 2-3 paragraphs long.
 `.trim()
 };
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
 export default async function handler(req, res) {
   try {
     const WEATHER_KEY = process.env.WEATHER_KEY;
-    const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
-    if (!WEATHER_KEY || !DEEPSEEK_API_KEY) {
-      return res.status(500).json({ 
-        error: "API keys are not configured" 
-      });
+    if (!WEATHER_KEY || !process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "API keys are not configured" });
     }
 
     const language = req.query.lang || 'ru';
-    
+
     if (!PROMPTS[language]) {
-      return res.status(400).json({ 
-        error: `Unsupported language: ${language}. Available: ru, eng` 
-      });
+      return res.status(400).json({ error: `Unsupported language: ${language}. Available: ru, eng` });
     }
 
     const weatherData = await fetchWeatherData(WEATHER_KEY);
-    const forecast = await generateForecast(DEEPSEEK_API_KEY, weatherData, language);
+    const forecast = await generateForecast(weatherData, language);
 
     return res.status(200).json({ forecast });
 
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
-    return res.status(500).json({ 
-      error: err.message || "An unexpected error occurred" 
-    });
+    return res.status(500).json({ error: err.message || "An unexpected error occurred" });
   }
 }
 
-/**
- * Получает часовые данные о погоде из WeatherAPI
- */
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
-  
   const response = await fetch(url);
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `WeatherAPI error: ${response.status} — ${errorText}`
-    );
+    throw new Error(`WeatherAPI error: ${response.status} — ${errorText}`);
   }
 
   const data = await response.json();
-
   return {
     location: data.location,
     current: data.current,
@@ -76,40 +66,16 @@ async function fetchWeatherData(apiKey) {
   };
 }
 
-/**
- * Генерирует текст прогноза с помощью DeepSeek gpt-5-mini
- */
-async function generateForecast(apiKey, weatherData, language) {
-  const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: "gpt-5-mini", // заменили модель на более быструю и дешевую
-      messages: [
-        {
-          role: "system",
-          content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner."
-        },
-        {
-          role: "user",
-          content: PROMPTS[language](weatherData)
-        }
-      ],
-      temperature: 0.7,   // для более «тёплого» текста
-      max_tokens: 200     // ограничиваем длину ответа
-    })
+async function generateForecast(weatherData, language) {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-5-mini", // ✅ модель OpenAI
+    messages: [
+      { role: "system", content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." },
+      { role: "user", content: PROMPTS[language](weatherData) }
+    ],
+    temperature: 0.7,
+    max_tokens: 200
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `DeepSeek API error: ${response.status} — ${errorText}`
-    );
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "Weather forecast is unavailable";
+  return completion.choices?.[0]?.message?.content || "Weather forecast is unavailable";
 }
