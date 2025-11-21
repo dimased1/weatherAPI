@@ -130,12 +130,18 @@ async function generateForecast(apiKey, weatherData, language) {
 
   const data = await response.json();
   
-  // Responses API возвращает текст в поле output.content
-  const content = data.output?.content || data.content || data.text;
+  // Извлекаем текст из разных возможных мест
+  const content = data.output?.content?.text 
+                || data.output?.content 
+                || data.output?.text
+                || data.content?.text
+                || data.content
+                || data.text
+                || data.output;
   
-  if (!content) {
+  if (!content || typeof content !== 'string') {
     console.error("OpenAI full response:", JSON.stringify(data, null, 2));
-    throw new Error("No content in OpenAI response");
+    throw new Error(`Invalid response format. Got: ${JSON.stringify(content)}`);
   }
   
   return content;
