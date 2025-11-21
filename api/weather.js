@@ -53,8 +53,13 @@ export default async function handler(req, res) {
     // Генерация прогноза с помощью GPT-5-nano
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
 
-    // Получаем текущую дату и время
-    const lastUpdated = new Date().toISOString();
+    // Получаем текущую дату и время в формате "21.11 12:45"
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const lastUpdated = `${day}.${month} ${hours}:${minutes}`;
 
     return res.status(200).json({ 
       forecast,
@@ -106,7 +111,7 @@ async function generateForecast(apiKey, weatherData, language) {
     },
     body: JSON.stringify({
       model: "gpt-5-nano",
-      max_completion_tokens: 150,
+      max_completion_tokens: 200,
       messages: [
         { 
           role: "system", 
@@ -129,5 +134,13 @@ async function generateForecast(apiKey, weatherData, language) {
 
   const data = await response.json();
   
-  return data.choices?.[0]?.message?.content || "Weather forecast is unavailable";
+  // Проверяем наличие content в ответе
+  const content = data.choices?.[0]?.message?.content;
+  
+  if (!content) {
+    console.error("OpenAI response:", JSON.stringify(data, null, 2));
+    throw new Error("No content in OpenAI response");
+  }
+  
+  return content;
 }
