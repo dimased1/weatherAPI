@@ -73,7 +73,7 @@ async function generateForecast(openaiKey, weatherData) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      max_output_tokens: 600
+      max_output_tokens: 2000
     })
   });
 
