@@ -100,10 +100,15 @@ async function fetchWeatherData(apiKey) {
 }
 
 /**
- * Генерирует текст прогноза с помощью GPT-5-nano
+ * Генерирует текст прогноза с помощью GPT-5-nano через Responses API
  */
 async function generateForecast(apiKey, weatherData, language) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  // Формируем полный промпт для Responses API
+  const systemPrompt = "You are a friendly weather assistant who provides forecasts in a warm and caring manner.";
+  const userPrompt = PROMPTS[language](weatherData);
+  const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -111,17 +116,8 @@ async function generateForecast(apiKey, weatherData, language) {
     },
     body: JSON.stringify({
       model: "gpt-5-nano",
-      max_completion_tokens: 200,
-      messages: [
-        { 
-          role: "system", 
-          content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." 
-        },
-        { 
-          role: "user", 
-          content: PROMPTS[language](weatherData) 
-        }
-      ]
+      input: fullPrompt,
+      max_output_tokens: 200
     })
   });
 
@@ -134,11 +130,11 @@ async function generateForecast(apiKey, weatherData, language) {
 
   const data = await response.json();
   
-  // Проверяем наличие content в ответе
-  const content = data.choices?.[0]?.message?.content;
+  // Responses API возвращает текст в поле output.content
+  const content = data.output?.content || data.content || data.text;
   
   if (!content) {
-    console.error("OpenAI response:", JSON.stringify(data, null, 2));
+    console.error("OpenAI full response:", JSON.stringify(data, null, 2));
     throw new Error("No content in OpenAI response");
   }
   
