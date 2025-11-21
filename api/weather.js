@@ -10,7 +10,7 @@ const PROMPTS = {
 2. Начни с приветствия по времени суток.
 3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, только в метрических единицах.
 4. Дай совет по одежде и при желании небольшой дневной совет.
-Выведи один связный текст по-русски в дружелюбном стиле, подели на абзацы, до 80-100 слов. Без эмоджи.
+Выведи один связный текст по-русски, можно в 1–2 абзацах, до 100 слов.
 `.trim(),
 
   eng: (weatherData) => `
@@ -29,10 +29,10 @@ Express the result as a single, coherent text in english, 2-3 paragraphs long.
 export default async function handler(req, res) {
   try {
     const WEATHER_KEY = process.env.WEATHER_KEY;
-    const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
     // Проверка наличия API-ключей
-    if (!WEATHER_KEY || !DEEPSEEK_API_KEY) {
+    if (!WEATHER_KEY || !OPENAI_API_KEY) {
       return res.status(500).json({ 
         error: "API keys are not configured" 
       });
@@ -50,8 +50,8 @@ export default async function handler(req, res) {
     // Получение часовых данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
 
-    // Генерация прогноза с помощью DeepSeek
-    const forecast = await generateForecast(DEEPSEEK_API_KEY, weatherData, language);
+    // Генерация прогноза с помощью GPT-5-nano
+    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
 
     // Получаем текущую дату и время
     const lastUpdated = new Date().toISOString();
@@ -95,17 +95,18 @@ async function fetchWeatherData(apiKey) {
 }
 
 /**
- * Генерирует текст прогноза с помощью DeepSeek
+ * Генерирует текст прогноза с помощью GPT-5-nano
  */
 async function generateForecast(apiKey, weatherData, language) {
-  const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: "gpt-5-nano",
+      max_tokens: 150,
       messages: [
         { 
           role: "system", 
@@ -122,7 +123,7 @@ async function generateForecast(apiKey, weatherData, language) {
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `DeepSeek API error: ${response.status} — ${errorText}`
+      `OpenAI API error: ${response.status} — ${errorText}`
     );
   }
 
