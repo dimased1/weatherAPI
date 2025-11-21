@@ -25,14 +25,12 @@ export default async function handler(req, res) {
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
-    // Проверка наличия API-ключей
     if (!WEATHER_KEY || !DEEPSEEK_API_KEY) {
       return res.status(500).json({ 
         error: "API keys are not configured" 
       });
     }
 
-    // Получение языка из параметров запроса (по умолчанию ru)
     const language = req.query.lang || 'ru';
     
     if (!PROMPTS[language]) {
@@ -41,10 +39,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Получение часовых данных о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
-
-    // Генерация прогноза с помощью DeepSeek
     const forecast = await generateForecast(DEEPSEEK_API_KEY, weatherData, language);
 
     return res.status(200).json({ forecast });
@@ -74,7 +69,6 @@ async function fetchWeatherData(apiKey) {
 
   const data = await response.json();
 
-  // Возвращаем структурированные данные с часовым прогнозом
   return {
     location: data.location,
     current: data.current,
@@ -83,7 +77,7 @@ async function fetchWeatherData(apiKey) {
 }
 
 /**
- * Генерирует текст прогноза с помощью DeepSeek
+ * Генерирует текст прогноза с помощью DeepSeek gpt-5-mini
  */
 async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -93,17 +87,19 @@ async function generateForecast(apiKey, weatherData, language) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: "gpt-5-mini", // заменили модель на более быструю и дешевую
       messages: [
-        { 
-          role: "system", 
-          content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." 
+        {
+          role: "system",
+          content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner."
         },
-        { 
-          role: "user", 
-          content: PROMPTS[language](weatherData) 
+        {
+          role: "user",
+          content: PROMPTS[language](weatherData)
         }
-      ]
+      ],
+      temperature: 0.7,   // для более «тёплого» текста
+      max_tokens: 200     // ограничиваем длину ответа
     })
   });
 
@@ -115,6 +111,5 @@ async function generateForecast(apiKey, weatherData, language) {
   }
 
   const data = await response.json();
-  
   return data.choices?.[0]?.message?.content || "Weather forecast is unavailable";
 }
