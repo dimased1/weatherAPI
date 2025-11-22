@@ -69,7 +69,7 @@ async function generateForecast(weatherData, language, apiKey) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-5-nano",  // Убедись, что модель доступна в аккаунте
+      model: "gpt-5-mini",  // Убедись, что модель доступна в аккаунте
       messages: [
         { role: "system", content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." },
         { role: "user", content: PROMPTS[language](weatherData) }
