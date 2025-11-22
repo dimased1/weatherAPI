@@ -69,13 +69,13 @@ async function generateForecast(weatherData, language, apiKey) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-5-mini",  // Убедись, что модель доступна в аккаунте
+      model: "gpt-5-nano", // или "gpt-5-mini-2025-08-07"
       messages: [
         { role: "system", content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." },
         { role: "user", content: PROMPTS[language](weatherData) }
       ],
-      temperature: 0.7,
-      max_completion_tokens: 200  // Используем параметр для GPT‑5 серии. :contentReference[oaicite:1]{index=1}
+      max_completion_tokens: 500 // токены для ответа
+      // ❌ убрали temperature, оно не поддерживается
     })
   });
 
