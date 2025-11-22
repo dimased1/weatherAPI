@@ -47,12 +47,10 @@ export default async function handler(req, res) {
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const resp = await fetch(url);
-
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`WeatherAPI error: ${resp.status} — ${text}`);
   }
-
   const data = await resp.json();
   return {
     location: data.location,
@@ -69,13 +67,13 @@ async function generateForecast(weatherData, language, apiKey) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-5-nano", // или "gpt-5-mini-2025-08-07"
+      model: "gpt-5-mini", // точно поддерживаемая модель. Согласно документации: "gpt-5-mini" или конкретная версия. :contentReference[oaicite:0]{index=0}  
       messages: [
         { role: "system", content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." },
         { role: "user", content: PROMPTS[language](weatherData) }
       ],
-      max_completion_tokens: 500 // токены для ответа
-      // ❌ убрали temperature, оно не поддерживается
+      // Для GPT‑5-mini используем параметр max_completion_tokens, чтобы ограничить длину:
+      max_completion_tokens: 200  // документация гласит, что нужно использовать этот параметр. :contentReference[oaicite:1]{index=1}  
     })
   });
 
@@ -85,5 +83,11 @@ async function generateForecast(weatherData, language, apiKey) {
   }
 
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content || "Weather forecast is unavailable";
+  
+  // Структура ответа Chat Completions: choices -> message -> content. :contentReference[oaicite:2]{index=2}
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("OpenAI response format unexpected: no message.content in choices");
+  }
+  return content;
 }
