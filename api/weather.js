@@ -1,13 +1,14 @@
 // /api/weather.js
+
 const CITY = "Edinburgh";
 
 const PROMPTS = {
   ru: (weatherData) => `
-Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее: 
-1. Укажи дату и день недели. 
-2. Начни с приветствия по времени суток. 
-3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические. 
-4. Дай совет по одежде и при желании небольшой дневной совет. 
+Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее:
+1. Укажи дату и день недели.
+2. Начни с приветствия по времени суток.
+3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические.
+4. Дай совет по одежде и при желании небольшой дневной совет.
 Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 120 слов.
 `.trim(),
   eng: (weatherData) => `
@@ -21,36 +22,54 @@ Express the result as a single, coherent text in english, 2-3 paragraphs long.
 `.trim()
 };
 
-export default async function handler(req, res) {
+// Глобальное хранилище в памяти (живёт пока живёт процесс)
+let cachedForecast = {
+  ru: null,
+  eng: null,
+  lastGeneratedAt: null, // timestamp
+};
+
+const WEATHER_KEY = process.env.WEATHER_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// Форматирование времени как "22.11 22:00"
+function formatTime(date) {
+  const d = date.getDate().toString().padStart(2, '0');
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const h = date.getHours().toString().padStart(2, '0');
+  const min = date.getMinutes().toString().padStart(2, '0');
+  return `${d}.${m} ${h}:${min}`;
+}
+
+// Основная функция генерации прогноза
+async function updateForecast() {
+  if (!WEATHER_KEY || !OPENAI_API_KEY) {
+    console.error("API keys missing, skipping forecast update");
+    return;
+  }
+
   try {
-    const WEATHER_KEY = process.env.WEATHER_KEY;
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const weatherData = await fetchWeatherData();
+    
+    const [ruForecast, engForecast] = await Promise.all([
+      generateForecast(weatherData, 'ru'),
+      generateForecast(weatherData, 'eng')
+    ]);
 
-    if (!WEATHER_KEY || !OPENAI_API_KEY) {
-      return res.status(500).json({ error: "API keys are not configured" });
-    }
+    cachedForecast = {
+      ru: ruForecast,
+      eng: engForecast,
+      lastGeneratedAt: new Date()
+    };
 
-    const language = req.query.lang || 'ru';
-    if (!PROMPTS[language]) {
-      return res.status(400).json({
-        error: `Unsupported language: ${language}. Available: ru, eng`
-      });
-    }
-
-    const weatherData = await fetchWeatherData(WEATHER_KEY);
-    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
-
-    return res.status(200).json({ forecast });
+    console.log("Прогноз успешно обновлён:", formatTime(cachedForecast.lastGeneratedAt));
   } catch (err) {
-    console.error("Ошибка в /api/weather:", err);
-    return res.status(500).json({
-      error: err.message || "An unexpected error occurred"
-    });
+    console.error("Ошибка при обновлении прогноза:", err);
   }
 }
 
-async function fetchWeatherData(apiKey) {
-  const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
+async function fetchWeatherData() {
+  const url = `https://api.weatherapi.com/v1/forecast.json?key=${WEATHER_KEY}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const response = await fetch(url);
   if (!response.ok) {
     const errorText = await response.text();
@@ -64,35 +83,79 @@ async function fetchWeatherData(apiKey) {
   };
 }
 
-async function generateForecast(apiKey, weatherData, language) {
+async function generateForecast(weatherData, language) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
+      "Authorization": `Bearer ${OPENAI_API_KEY}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",                     // работает
+      model: "gpt-4o-mini",
       messages: [
-        {
-          role: "system",
-          content: "Ты дружелюбный и заботливый погодный помощник."
-        },
-        {
-          role: "user",
-          content: PROMPTS[language](weatherData)
-        }
+        { role: "system", content: "Ты дружелюбный и заботливый погодный помощник." },
+        { role: "user", content: PROMPTS[language](weatherData) }
       ],
-      max_completion_tokens: 500              // ← правильный параметр для всей линейки GPT-5
-      // temperature НЕ поддерживается в gpt-5-nano
+      max_completion_tokens: 500
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI API error: ${response.status} — ${errorText}`);
+    throw new Error(`OpenAI error: ${response.status} — ${errorText}`);
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "Прогноз недоступен";
+  return data.choices?.[0]?.message?.content?.trim() || "Прогноз временно недоступен";
+}
+
+// === Автоматическое обновление каждые 2 часа ===
+let isUpdating = false;
+
+async function startAutoUpdate() {
+  // Первый запуск сразу
+  await updateForecast();
+
+  // Затем каждые 2 часа (7200000 мс)
+  setInterval(async () => {
+    if (isUpdating) return;
+    isUpdating = true;
+    await updateForecast();
+    isUpdating = false;
+  }, 2 * 60 * 60 * 1000);
+}
+
+// Запускаем при старте модуля (один раз при деплое)
+if (!global.__weatherUpdaterStarted) {
+  global.__weatherUpdaterStarted = true;
+  startAutoUpdate();
+}
+
+// === Обработчик API ===
+export default async function handler(req, res) {
+  const language = req.query.lang || 'ru';
+
+  if (!PROMPTS[language]) {
+    return res.status(400).json({
+      error: `Unsupported language: ${language}. Available: ru, eng`
+    });
+  }
+
+  // Если прогноз ещё не готов (редкий случай при холодном старте)
+  if (!cachedForecast[language]) {
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.status(503).json({
+      forecast: "Прогноз генерируется, подождите 5–10 секунд и попробуйте снова...",
+      lastGenerated: null
+    });
+  }
+
+  const timeStr = cachedForecast.lastGeneratedAt
+    ? formatTime(cachedForecast.lastGeneratedAt)
+    : null;
+
+  res.status(200).json({
+    forecast: cachedForecast[language],
+    lastGenerated: timeStr
+  });
 }
