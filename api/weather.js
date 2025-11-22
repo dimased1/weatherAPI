@@ -4,11 +4,18 @@ const CITY = "Edinburgh";
 
 const PROMPTS = {
   ru: (weatherData) => `
-Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее: 1. Укажи дату и день недели. 2. Начни с приветствия по времени суток. 3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, только в метрических единицах. 4. Дай совет по одежде и при желании небольшой дневной совет. Выведи один связный текст по-русски, можно в 1–2 абзацах, до 100 слов.
+Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее: 1. Укажи дату и день недели. 2. Начни с приветствия по времени суток. 3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, только в метрических единицах. 4. Дай совет по одежде и при желании небольшой дневной совет. Выведи один связный текст по‑русски, можно в 1–2 абзацах, до ~100 слов.
 `.trim(),
 
   eng: (weatherData) => `
-Imagine that you are a friendly voice assistant who gives weather forecasts to people in simple, kind language. Use the provided JSON weather data (${JSON.stringify(weatherData)}). 1. Include date and day of week. 2. Greet appropriately for the time of day. 3. Give a short, pleasant forecast: temperature, precipitation, wind, metric units only. 4. Provide clothing advice. Express in 2-3 paragraphs.
+Imagine that you are a friendly voice assistant who gives weather forecasts to people in simple, kind language. Use the provided JSON weather data (${JSON.stringify(weatherData)}).  
+1. Determine the date and day of the week and include them in the forecast text.  
+2. Begin the message with a greeting appropriate to the time of day (e.g., 'Good morning,' 'Good afternoon,' 'Good evening.')  
+3. Provide a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important factors. Use only degrees and metric units.  
+4. Provide clothing advice based on the weather.  
+5. Mention if changes in the weather are expected during the day (e.g., rain in the afternoon or a cooler temperature in the evening).  
+
+Express the result as a single, coherent text in English, 2‑3 paragraphs long.
 `.trim()
 };
 
@@ -40,10 +47,12 @@ export default async function handler(req, res) {
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const resp = await fetch(url);
+
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`WeatherAPI error: ${resp.status} — ${text}`);
   }
+
   const data = await resp.json();
   return {
     location: data.location,
@@ -60,13 +69,13 @@ async function generateForecast(weatherData, language, apiKey) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-5-mini", // ✅ без пакета, напрямую
+      model: "gpt‑5‑mini",  // Убедись, что модель доступна в аккаунте
       messages: [
         { role: "system", content: "You are a friendly weather assistant who provides forecasts in a warm and caring manner." },
         { role: "user", content: PROMPTS[language](weatherData) }
       ],
       temperature: 0.7,
-      max_tokens: 200
+      max_completion_tokens: 200  // Используем параметр для GPT‑5 серии. :contentReference[oaicite:1]{index=1}
     })
   });
 
