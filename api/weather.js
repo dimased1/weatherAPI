@@ -1,79 +1,96 @@
 // /api/weather.js
+import fs from 'fs';
+import path from 'path';
 
 const CITY = "Edinburgh";
+const CACHE_FILE = '/tmp/weather_cache.json';
+const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 часа в миллисекундах
 
-const PROMPTS = {
-  ru: (weatherData) => `
-Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее:
-1. Укажи дату и день недели.
-2. Начни с приветствия по времени суток.
-3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические.
-4. Дай совет по одежде и при желании небольшой дневной совет.
+const PROMPT = (weatherData) => `
+Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее: 
+1. Укажи дату и день недели. 
+2. Начни с приветствия по времени суток. 
+3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические. 
+4. Дай совет по одежде и при желании небольшой дневной совет. 
 Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 120 слов.
-`.trim(),
-  eng: (weatherData) => `
-Imagine that you are a friendly voice assistant who gives weather forecasts to people in simple, kind language. Use the provided JSON weather data (${JSON.stringify(weatherData)}) to:
-1. Determine the date and day of the week and include them in the forecast text.
-2. Begin the message with a greeting appropriate to the time of day.
-3. Provide a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important factors. Use only metric units.
-4. Provide clothing advice based on the weather.
-5. Mention if changes in the weather are expected during the day.
-Express the result as a single, coherent text in english, 2-3 paragraphs long.
-`.trim()
-};
+`.trim();
 
-// Глобальное хранилище в памяти (живёт пока живёт процесс)
-let cachedForecast = {
-  ru: null,
-  eng: null,
-  lastGeneratedAt: null, // timestamp
-};
-
-const WEATHER_KEY = process.env.WEATHER_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-// Форматирование времени как "22.11 22:00"
-function formatTime(date) {
-  const d = date.getDate().toString().padStart(2, '0');
-  const m = (date.getMonth() + 1).toString().padStart(2, '0');
-  const h = date.getHours().toString().padStart(2, '0');
-  const min = date.getMinutes().toString().padStart(2, '0');
-  return `${d}.${m} ${h}:${min}`;
-}
-
-// Основная функция генерации прогноза
-async function updateForecast() {
-  if (!WEATHER_KEY || !OPENAI_API_KEY) {
-    console.error("API keys missing, skipping forecast update");
-    return;
-  }
-
+export default async function handler(req, res) {
   try {
-    const weatherData = await fetchWeatherData();
+    const language = req.query.lang || 'ru';
     
-    const [ruForecast, engForecast] = await Promise.all([
-      generateForecast(weatherData, 'ru'),
-      generateForecast(weatherData, 'eng')
-    ]);
+    if (language !== 'ru') {
+      return res.status(400).json({
+        error: `Неподдерживаемый язык: ${language}. Доступен только: ru`
+      });
+    }
 
-    cachedForecast = {
-      ru: ruForecast,
-      eng: engForecast,
-      lastGeneratedAt: new Date()
-    };
+    // Проверяем кеш
+    const cached = readCache();
+    const now = Date.now();
+    
+    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      // Кеш актуален, возвращаем
+      return res.status(200).json({
+        forecast: cached.forecast,
+        generatedAt: cached.generatedAt
+      });
+    }
 
-    console.log("Прогноз успешно обновлён:", formatTime(cachedForecast.lastGeneratedAt));
+    // Кеш устарел или отсутствует, генерируем новый прогноз
+    const WEATHER_KEY = process.env.WEATHER_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+    if (!WEATHER_KEY || !OPENAI_API_KEY) {
+      return res.status(500).json({ error: "API ключи не настроены" });
+    }
+
+    const weatherData = await fetchWeatherData(WEATHER_KEY);
+    const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
+    const generatedAt = formatDateTime(new Date());
+
+    // Сохраняем в кеш
+    writeCache({
+      forecast,
+      generatedAt,
+      timestamp: now
+    });
+
+    return res.status(200).json({ forecast, generatedAt });
   } catch (err) {
-    console.error("Ошибка при обновлении прогноза:", err);
+    console.error("Ошибка в /api/weather:", err);
+    return res.status(500).json({
+      error: err.message || "Произошла неожиданная ошибка"
+    });
   }
 }
 
-async function fetchWeatherData() {
-  const url = `https://api.weatherapi.com/v1/forecast.json?key=${WEATHER_KEY}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
+function readCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const data = fs.readFileSync(CACHE_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Ошибка чтения кеша:", err);
+  }
+  return null;
+}
+
+function writeCache(data) {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data), 'utf8');
+  } catch (err) {
+    console.error("Ошибка записи кеша:", err);
+  }
+}
+
+async function fetchWeatherData(apiKey) {
+  const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const response = await fetch(url);
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`WeatherAPI error: ${response.status} — ${errorText}`);
+    throw new Error(`WeatherAPI ошибка: ${response.status} — ${errorText}`);
   }
   const data = await response.json();
   return {
@@ -83,18 +100,24 @@ async function fetchWeatherData() {
   };
 }
 
-async function generateForecast(weatherData, language) {
+async function generateForecast(apiKey, weatherData) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`
+      "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "Ты дружелюбный и заботливый погодный помощник." },
-        { role: "user", content: PROMPTS[language](weatherData) }
+        {
+          role: "system",
+          content: "Ты дружелюбный и заботливый погодный помощник."
+        },
+        {
+          role: "user",
+          content: PROMPT(weatherData)
+        }
       ],
       max_completion_tokens: 500
     })
@@ -102,60 +125,17 @@ async function generateForecast(weatherData, language) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI error: ${response.status} — ${errorText}`);
+    throw new Error(`OpenAI API ошибка: ${response.status} — ${errorText}`);
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "Прогноз временно недоступен";
+  return data.choices?.[0]?.message?.content?.trim() || "Прогноз недоступен";
 }
 
-// === Автоматическое обновление каждые 2 часа ===
-let isUpdating = false;
-
-async function startAutoUpdate() {
-  // Первый запуск сразу
-  await updateForecast();
-
-  // Затем каждые 2 часа (7200000 мс)
-  setInterval(async () => {
-    if (isUpdating) return;
-    isUpdating = true;
-    await updateForecast();
-    isUpdating = false;
-  }, 2 * 60 * 60 * 1000);
-}
-
-// Запускаем при старте модуля (один раз при деплое)
-if (!global.__weatherUpdaterStarted) {
-  global.__weatherUpdaterStarted = true;
-  startAutoUpdate();
-}
-
-// === Обработчик API ===
-export default async function handler(req, res) {
-  const language = req.query.lang || 'ru';
-
-  if (!PROMPTS[language]) {
-    return res.status(400).json({
-      error: `Unsupported language: ${language}. Available: ru, eng`
-    });
-  }
-
-  // Если прогноз ещё не готов (редкий случай при холодном старте)
-  if (!cachedForecast[language]) {
-    res.setHeader('Cache-Control', 'no-cache');
-    return res.status(503).json({
-      forecast: "Прогноз генерируется, подождите 5–10 секунд и попробуйте снова...",
-      lastGenerated: null
-    });
-  }
-
-  const timeStr = cachedForecast.lastGeneratedAt
-    ? formatTime(cachedForecast.lastGeneratedAt)
-    : null;
-
-  res.status(200).json({
-    forecast: cachedForecast[language],
-    lastGenerated: timeStr
-  });
+function formatDateTime(date) {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${day}.${month} ${hours}:${minutes}`;
 }
