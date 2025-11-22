@@ -72,7 +72,7 @@ async function generateForecast(apiKey, weatherData, language) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-5-nano",  // работает идеально
+      model: "gpt-5-nano",                     // работает
       messages: [
         {
           role: "system",
@@ -83,8 +83,8 @@ async function generateForecast(apiKey, weatherData, language) {
           content: PROMPTS[language](weatherData)
         }
       ],
-      max_tokens: 500
-      // temperature убран — он запрещён для gpt-5-nano
+      max_completion_tokens: 500              // ← правильный параметр для всей линейки GPT-5
+      // temperature НЕ поддерживается в gpt-5-nano
     })
   });
 
