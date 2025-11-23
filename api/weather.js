@@ -1,4 +1,5 @@
 // /api/weather.js
+import fs from 'fs';
 import path from 'path';
 
 const CITY = "Edinburgh";
@@ -9,13 +10,14 @@ const PROMPT = (weatherData) => `
 2. Начни с приветствия по времени суток.
 3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические.
 4. Дай совет по одежде и при желании небольшой дневной совет.
-Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 30 слов.
+
+Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 120 слов.
 `.trim();
 
 export default async function handler(req, res) {
   try {
     const language = req.query.lang || 'ru';
-   
+
     if (language !== 'ru') {
       return res.status(400).json({
         error: `Неподдерживаемый язык: ${language}. Доступен только: ru`
@@ -25,22 +27,15 @@ export default async function handler(req, res) {
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-    if (!WEATHER_KEY || !OPENAI_KEY) {
+    if (!WEATHER_KEY || !OPENAI_API_KEY) {
       return res.status(500).json({ error: "API ключи не настроены" });
     }
 
-    // Получаем свежие данные о погоде
     const weatherData = await fetchWeatherData(WEATHER_KEY);
-    
-    // Генерируем новый прогноз через OpenAI
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
     const generatedAt = formatDateTime(new Date());
 
-    return res.status(200).json({ 
-      forecast, 
-      generatedAt 
-    });
-
+    return res.status(200).json({ forecast, generatedAt });
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
     return res.status(500).json({
@@ -52,12 +47,12 @@ export default async function handler(req, res) {
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const response = await fetch(url);
-  
+
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`WeatherAPI ошибка: ${response.status} — ${errorText}`);
   }
-  
+
   const data = await response.json();
   return {
     location: data.location,
