@@ -1,0 +1,76 @@
+import OpenAI from "openai";
+
+export default async function handler(req, res) {
+  try {
+    const city = req.query.city || "Kyiv";
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const weatherKey = process.env.WEATHER_API_KEY;
+
+    if (!openaiKey || !weatherKey) {
+      return res.status(500).json({ error: "Missing API keys" });
+    }
+
+    // --- 1. Получаем погоду по часам ---
+    const weatherUrl = `http://api.weatherapi.com/v1/forecast.json?key=${weatherKey}&q=${city}&days=1&aqi=no&alerts=no`;
+    const weatherResp = await fetch(weatherUrl);
+    const weatherData = await weatherResp.json();
+
+    if (weatherData.error) {
+      return res.status(500).json({ error: weatherData.error.message });
+    }
+
+    const hours = weatherData.forecast.forecastday[0].hour;
+    const location = weatherData.location;
+    const now = new Date();
+
+    const dateString = now.toLocaleDateString("ru-RU", {
+      weekday: "long",
+      month: "long",
+      day: "numeric"
+    });
+
+    // Определение времени суток
+    const hourNow = now.getHours();
+    let greeting = "Здравствуйте";
+
+    if (hourNow >= 5 && hourNow < 12) greeting = "Доброе утро";
+    else if (hourNow >= 12 && hourNow < 18) greeting = "Добрый день";
+    else if (hourNow >= 18 && hourNow < 23) greeting = "Добрый вечер";
+    else greeting = "Доброй ночи";
+
+    // --- 2. Формируем промпт ---
+    const prompt = `
+Сегодня ${dateString}.
+${greeting}!
+
+Вот погодные данные по часам для города ${location.name}.
+Дай короткий, дружелюбный прогноз на день с рекомендациями по одежде и активности.
+Не используй смайлики.
+Не пиши слишком длинно.
+
+Данные (каждый час):
+${hours.map(h => `${h.time}: ${h.temp_c}°C, ${h.condition.text}, ветер ${h.wind_kph} км/ч, влажность ${h.humidity}%`).join("\n")}
+    `;
+
+    // --- 3. GPT-5 nano ---
+    const client = new OpenAI({ apiKey: openaiKey });
+
+    const completion = await client.chat.completions.create({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.5,
+      max_tokens: 220
+    });
+
+    const result = completion.choices[0].message.content;
+
+    return res.status(200).json({
+      city: location.name,
+      date: dateString,
+      message: result
+    });
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
