@@ -11,7 +11,7 @@ const PROMPT = (weatherData) => `
 3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические.
 4. Дай совет по одежде и при желании небольшой дневной совет.
 
-Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 20 слов.
+Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 120 слов.
 `.trim();
 
 export default async function handler(req, res) {
@@ -34,6 +34,12 @@ export default async function handler(req, res) {
     const weatherData = await fetchWeatherData(WEATHER_KEY);
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
     const generatedAt = formatDateTime(new Date());
+
+    // Добавляем заголовки против кеширования
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
 
     return res.status(200).json({ forecast, generatedAt });
   } catch (err) {
