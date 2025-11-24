@@ -1,88 +1,50 @@
 // /api/weather.js
-import fs from 'fs';
-import path from 'path';
-
 const CITY = "Edinburgh";
-const CACHE_DURATION = 10 * 60 * 1000; // 10 минут
 
-let cache = {
-  data: null,
-  timestamp: 0
+const PROMPTS = {
+  ru: (weatherData) => `
+Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее: 
+1. Укажи дату и день недели. 
+2. Начни с приветствия по времени суток. 
+3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические. 
+4. Дай совет по одежде и при желании небольшой дневной совет. 
+Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 70 слов.
+`.trim(),
+  eng: (weatherData) => `
+Imagine that you are a friendly voice assistant who gives weather forecasts to people in simple, kind language. Use the provided JSON weather data (${JSON.stringify(weatherData)}) to:
+1. Determine the date and day of the week and include them in the forecast text.
+2. Begin the message with a greeting appropriate to the time of day.
+3. Provide a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important factors. Use only metric units.
+4. Provide clothing advice based on the weather.
+5. Mention if changes in the weather are expected during the day.
+Express the result as a single, coherent text in english, 2-3 paragraphs long.
+`.trim()
 };
-
-const PROMPT = (weatherData) => `
-Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее:
-1. Укажи дату и день недели.
-2. Начни с приветствия по времени суток.
-3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические.
-4. Дай совет по одежде и при желании небольшой дневной совет.
-
-Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 50 слов.
-`.trim();
 
 export default async function handler(req, res) {
   try {
-    const language = req.query.lang || 'ru';
-    const now = Date.now();
-
-    // ЛОГИРУЕМ ВСЕ О ЗАПРОСЕ
-    console.log('=== НОВЫЙ ЗАПРОС ===');
-    console.log('Время:', new Date().toISOString());
-    console.log('Метод:', req.method);
-    console.log('URL:', req.url);
-    console.log('User-Agent:', req.headers['user-agent']);
-
-    if (language !== 'ru') {
-      return res.status(400).json({
-        error: `Неподдерживаемый язык: ${language}. Доступен только: ru`
-      });
-    }
-
-    // БЕЗ КЕША - ВСЕГДА ГЕНЕРИРУЕМ НОВЫЕ ДАННЫЕ
-    console.log('⚡ Генерируем новые данные');
-
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
     if (!WEATHER_KEY || !OPENAI_API_KEY) {
-      return res.status(500).json({ error: "API ключи не настроены" });
+      return res.status(500).json({ error: "API keys are not configured" });
+    }
+
+    const language = req.query.lang || 'ru';
+    if (!PROMPTS[language]) {
+      return res.status(400).json({
+        error: `Unsupported language: ${language}. Available: ru, eng`
+      });
     }
 
     const weatherData = await fetchWeatherData(WEATHER_KEY);
-    const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
-    const generatedAt = formatDateTime(new Date());
+    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
 
-    // Уникальный ETag и данные при каждом запросе
-    const etag = `"${now}-${Math.random().toString(36).substr(2, 9)}"`;
-    
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store, must-revalidate, max-age=0');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader('ETag', etag);
-    res.setHeader('Vary', '*');
-    res.setHeader('X-Timestamp', now.toString());
-    res.setHeader('X-Request-ID', `${now}-${Math.random().toString(36).substr(2, 9)}`);
-
-    const responseData = {
-      forecast,
-      generatedAt,
-      _updated: now,
-      _requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
-    };
-
-    res.status(200);
-    console.log('✓ Отправляем НОВЫЙ прогноз, статус 200, ETag:', etag);
-    console.log('Размер ответа:', JSON.stringify(responseData).length, 'байт');
-    return res.json(responseData);
-    
+    return res.status(200).json({ forecast });
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
-    
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.status(500);
-    return res.json({
-      error: err.message || "Произошла неожиданная ошибка"
+    return res.status(500).json({
+      error: err.message || "An unexpected error occurred"
     });
   }
 }
@@ -90,12 +52,10 @@ export default async function handler(req, res) {
 async function fetchWeatherData(apiKey) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const response = await fetch(url);
-
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`WeatherAPI ошибка: ${response.status} — ${errorText}`);
+    throw new Error(`WeatherAPI error: ${response.status} — ${errorText}`);
   }
-
   const data = await response.json();
   return {
     location: data.location,
@@ -104,7 +64,7 @@ async function fetchWeatherData(apiKey) {
   };
 }
 
-async function generateForecast(apiKey, weatherData) {
+async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -112,7 +72,7 @@ async function generateForecast(apiKey, weatherData) {
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: "gpt-4o-mini",                     // работает
       messages: [
         {
           role: "system",
@@ -120,26 +80,19 @@ async function generateForecast(apiKey, weatherData) {
         },
         {
           role: "user",
-          content: PROMPT(weatherData)
+          content: PROMPTS[language](weatherData)
         }
       ],
-      max_completion_tokens: 150
+      max_completion_tokens: 500              // ← правильный параметр для всей линейки GPT-5
+      // temperature НЕ поддерживается в gpt-5-nano
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI API ошибка: ${response.status} — ${errorText}`);
+    throw new Error(`OpenAI API error: ${response.status} — ${errorText}`);
   }
 
   const data = await response.json();
   return data.choices?.[0]?.message?.content?.trim() || "Прогноз недоступен";
-}
-
-function formatDateTime(date) {
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${day}.${month} ${hours}:${minutes}`;
 }
