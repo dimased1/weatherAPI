@@ -17,7 +17,7 @@ const PROMPT = (weatherData) => `
 3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические.
 4. Дай совет по одежде и при желании небольшой дневной совет.
 
-Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 80 слов.
+Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 50 слов.
 `.trim();
 
 export default async function handler(req, res) {
@@ -57,9 +57,16 @@ export default async function handler(req, res) {
       res.setHeader('X-Timestamp', now.toString());
       res.setHeader('X-Request-ID', `${now}-${Math.random().toString(36).substr(2, 9)}`);
       
+      // Добавляем timestamp В ОТВЕТ для HMI
+      const responseData = {
+        ...cache.data,
+        _updated: now,  // Это поле ВСЕГДА разное
+        _requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
+      };
+      
       res.status(200);
       console.log('Отправляем ответ со статусом 200, ETag:', etag);
-      return res.json(cache.data);
+      return res.json(responseData);
     }
 
     console.log('⚡ Генерируем новые данные');
@@ -75,15 +82,12 @@ export default async function handler(req, res) {
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
     const generatedAt = formatDateTime(new Date());
 
-    // Сохраняем в кеш
+    // Сохраняем в кеш БЕЗ timestamp в самом JSON
+    // Это важно - если в JSON будет timestamp, он будет разным при кеше
     cache = {
       data: { 
         forecast, 
-        generatedAt,
-        timestamp: now,
-        unixTimestamp: Math.floor(now / 1000),
-        isoTimestamp: new Date().toISOString(),
-        requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
+        generatedAt
       },
       timestamp: now
     };
@@ -103,7 +107,15 @@ export default async function handler(req, res) {
     res.status(200);
     console.log('✓ Отправляем НОВЫЙ прогноз, статус 200, ETag:', etag);
     console.log('Размер ответа:', JSON.stringify(cache.data).length, 'байт');
-    return res.json(cache.data);
+    
+    // Добавляем timestamp В ОТВЕТ для HMI
+    const responseData = {
+      ...cache.data,
+      _updated: now,
+      _requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
+    };
+    
+    return res.json(responseData);
     
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
