@@ -3,9 +3,8 @@ import fs from 'fs';
 import path from 'path';
 
 const CITY = "Edinburgh";
-const CACHE_DURATION = 10 * 60 * 1000; // 10 минут в миллисекундах
+const CACHE_DURATION = 10 * 60 * 1000; // 10 минут
 
-// Простой кеш в памяти
 let cache = {
   data: null,
   timestamp: 0
@@ -26,6 +25,15 @@ export default async function handler(req, res) {
     const language = req.query.lang || 'ru';
     const now = Date.now();
 
+    // ЛОГИРУЕМ ВСЕ О ЗАПРОСЕ
+    console.log('=== НОВЫЙ ЗАПРОС ===');
+    console.log('Время:', new Date().toISOString());
+    console.log('Метод:', req.method);
+    console.log('URL:', req.url);
+    console.log('User-Agent:', req.headers['user-agent']);
+    console.log('Заголовки запроса:', JSON.stringify(req.headers, null, 2));
+    console.log('Query параметры:', req.query);
+
     if (language !== 'ru') {
       return res.status(400).json({
         error: `Неподдерживаемый язык: ${language}. Доступен только: ru`
@@ -34,20 +42,27 @@ export default async function handler(req, res) {
 
     // Проверяем кеш
     if (cache.data && (now - cache.timestamp) < CACHE_DURATION) {
-      console.log('Возвращаем закешированные данные');
+      console.log('✓ Возвращаем закешированные данные');
+      console.log('Возраст кеша (сек):', Math.floor((now - cache.timestamp) / 1000));
       
-      // Важно: возвращаем разные заголовки для обхода кеша клиента
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      // КРИТИЧНО для HeadlessChrome: ETag должен меняться каждый раз!
+      const etag = `"${now}-${Math.random().toString(36).substr(2, 9)}"`;
+      
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, must-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
-      res.setHeader('X-Cache', 'HIT');
-      res.setHeader('X-Cache-Age', Math.floor((now - cache.timestamp) / 1000));
-      res.setHeader('Last-Modified', new Date(cache.timestamp).toUTCString());
+      res.setHeader('ETag', etag); // Уникальный ETag заставит браузер считать ответ новым
+      res.setHeader('Vary', '*'); // Указываем что каждый запрос уникален
+      res.setHeader('X-Timestamp', now.toString());
+      res.setHeader('X-Request-ID', `${now}-${Math.random().toString(36).substr(2, 9)}`);
       
-      return res.status(200).json(cache.data);
+      res.status(200);
+      console.log('Отправляем ответ со статусом 200, ETag:', etag);
+      return res.json(cache.data);
     }
 
-    console.log('Генерируем новые данные');
+    console.log('⚡ Генерируем новые данные');
 
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -62,21 +77,40 @@ export default async function handler(req, res) {
 
     // Сохраняем в кеш
     cache = {
-      data: { forecast, generatedAt },
+      data: { 
+        forecast, 
+        generatedAt,
+        timestamp: now,
+        unixTimestamp: Math.floor(now / 1000),
+        isoTimestamp: new Date().toISOString(),
+        requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
+      },
       timestamp: now
     };
 
-    // Заголовки против кеширования на клиенте
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    // КРИТИЧНО: Content-Type ПЕРВЫМ
+    const etag = `"${now}-${Math.random().toString(36).substr(2, 9)}"`;
+    
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, must-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    res.setHeader('X-Cache', 'MISS');
-    res.setHeader('Last-Modified', new Date().toUTCString());
+    res.setHeader('ETag', etag);
+    res.setHeader('Vary', '*');
+    res.setHeader('X-Timestamp', now.toString());
+    res.setHeader('X-Request-ID', `${now}-${Math.random().toString(36).substr(2, 9)}`);
 
-    return res.status(200).json(cache.data);
+    res.status(200);
+    console.log('✓ Отправляем НОВЫЙ прогноз, статус 200, ETag:', etag);
+    console.log('Размер ответа:', JSON.stringify(cache.data).length, 'байт');
+    return res.json(cache.data);
+    
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
-    return res.status(500).json({
+    
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(500);
+    return res.json({
       error: err.message || "Произошла неожиданная ошибка"
     });
   }
@@ -118,7 +152,7 @@ async function generateForecast(apiKey, weatherData) {
           content: PROMPT(weatherData)
         }
       ],
-      max_completion_tokens: 150 // Уменьшено для скорости
+      max_completion_tokens: 150
     })
   });
 
