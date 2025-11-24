@@ -3,6 +3,13 @@ import fs from 'fs';
 import path from 'path';
 
 const CITY = "Edinburgh";
+const CACHE_DURATION = 10 * 60 * 1000; // 10 минут в миллисекундах
+
+// Простой кеш в памяти
+let cache = {
+  data: null,
+  timestamp: 0
+};
 
 const PROMPT = (weatherData) => `
 Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее:
@@ -17,12 +24,30 @@ const PROMPT = (weatherData) => `
 export default async function handler(req, res) {
   try {
     const language = req.query.lang || 'ru';
+    const now = Date.now();
 
     if (language !== 'ru') {
       return res.status(400).json({
         error: `Неподдерживаемый язык: ${language}. Доступен только: ru`
       });
     }
+
+    // Проверяем кеш
+    if (cache.data && (now - cache.timestamp) < CACHE_DURATION) {
+      console.log('Возвращаем закешированные данные');
+      
+      // Важно: возвращаем разные заголовки для обхода кеша клиента
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('X-Cache-Age', Math.floor((now - cache.timestamp) / 1000));
+      res.setHeader('Last-Modified', new Date(cache.timestamp).toUTCString());
+      
+      return res.status(200).json(cache.data);
+    }
+
+    console.log('Генерируем новые данные');
 
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -35,13 +60,20 @@ export default async function handler(req, res) {
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
     const generatedAt = formatDateTime(new Date());
 
-    // Добавляем заголовки против кеширования
+    // Сохраняем в кеш
+    cache = {
+      data: { forecast, generatedAt },
+      timestamp: now
+    };
+
+    // Заголовки против кеширования на клиенте
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    res.setHeader('Surrogate-Control', 'no-store');
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Last-Modified', new Date().toUTCString());
 
-    return res.status(200).json({ forecast, generatedAt });
+    return res.status(200).json(cache.data);
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
     return res.status(500).json({
@@ -86,7 +118,7 @@ async function generateForecast(apiKey, weatherData) {
           content: PROMPT(weatherData)
         }
       ],
-      max_completion_tokens: 500
+      max_completion_tokens: 150 // Уменьшено для скорости
     })
   });
 
