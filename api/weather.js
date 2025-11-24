@@ -31,8 +31,6 @@ export default async function handler(req, res) {
     console.log('Метод:', req.method);
     console.log('URL:', req.url);
     console.log('User-Agent:', req.headers['user-agent']);
-    console.log('Заголовки запроса:', JSON.stringify(req.headers, null, 2));
-    console.log('Query параметры:', req.query);
 
     if (language !== 'ru') {
       return res.status(400).json({
@@ -40,35 +38,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Проверяем кеш
-    if (cache.data && (now - cache.timestamp) < CACHE_DURATION) {
-      console.log('✓ Возвращаем закешированные данные');
-      console.log('Возраст кеша (сек):', Math.floor((now - cache.timestamp) / 1000));
-      
-      // КРИТИЧНО для HeadlessChrome: ETag должен меняться каждый раз!
-      const etag = `"${now}-${Math.random().toString(36).substr(2, 9)}"`;
-      
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-store, must-revalidate, max-age=0');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.setHeader('ETag', etag); // Уникальный ETag заставит браузер считать ответ новым
-      res.setHeader('Vary', '*'); // Указываем что каждый запрос уникален
-      res.setHeader('X-Timestamp', now.toString());
-      res.setHeader('X-Request-ID', `${now}-${Math.random().toString(36).substr(2, 9)}`);
-      
-      // Добавляем timestamp В ОТВЕТ для HMI
-      const responseData = {
-        ...cache.data,
-        _updated: now,  // Это поле ВСЕГДА разное
-        _requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
-      };
-      
-      res.status(200);
-      console.log('Отправляем ответ со статусом 200, ETag:', etag);
-      return res.json(responseData);
-    }
-
+    // БЕЗ КЕША - ВСЕГДА ГЕНЕРИРУЕМ НОВЫЕ ДАННЫЕ
     console.log('⚡ Генерируем новые данные');
 
     const WEATHER_KEY = process.env.WEATHER_KEY;
@@ -82,17 +52,7 @@ export default async function handler(req, res) {
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData);
     const generatedAt = formatDateTime(new Date());
 
-    // Сохраняем в кеш БЕЗ timestamp в самом JSON
-    // Это важно - если в JSON будет timestamp, он будет разным при кеше
-    cache = {
-      data: { 
-        forecast, 
-        generatedAt
-      },
-      timestamp: now
-    };
-
-    // КРИТИЧНО: Content-Type ПЕРВЫМ
+    // Уникальный ETag и данные при каждом запросе
     const etag = `"${now}-${Math.random().toString(36).substr(2, 9)}"`;
     
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -104,17 +64,16 @@ export default async function handler(req, res) {
     res.setHeader('X-Timestamp', now.toString());
     res.setHeader('X-Request-ID', `${now}-${Math.random().toString(36).substr(2, 9)}`);
 
-    res.status(200);
-    console.log('✓ Отправляем НОВЫЙ прогноз, статус 200, ETag:', etag);
-    console.log('Размер ответа:', JSON.stringify(cache.data).length, 'байт');
-    
-    // Добавляем timestamp В ОТВЕТ для HMI
     const responseData = {
-      ...cache.data,
+      forecast,
+      generatedAt,
       _updated: now,
       _requestId: `${now}-${Math.random().toString(36).substr(2, 9)}`
     };
-    
+
+    res.status(200);
+    console.log('✓ Отправляем НОВЫЙ прогноз, статус 200, ETag:', etag);
+    console.log('Размер ответа:', JSON.stringify(responseData).length, 'байт');
     return res.json(responseData);
     
   } catch (err) {
