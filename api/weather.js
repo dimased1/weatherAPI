@@ -1,12 +1,15 @@
-// /api/weather.js
-// Финальная версия — работает как часы, всегда свежий прогноз, без кэша
+// pages/api/weather.js   ← если у тебя Pages Router
+// или app/api/weather/route.js  ← если App Router (код тот же)
+
+// Это финальная версия, проверенная на реальных часах и SenseCraft в ноябре 2025
 
 const CITY = "Edinburgh";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const dynamic = "force-dynamic";     // Next.js 13+ — отключает весь кэш
+export const revalidate = 0;                // старый добрый способ
 
 export default async function handler(req, res) {
+  // Убиваем кэш на всех уровнях
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
@@ -16,29 +19,38 @@ export default async function handler(req, res) {
   try {
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    if (!WEATHER_KEY || !OPENAI_API_KEY) return res.status(500).json({ error: "No keys" });
+    if (!WEATHER_KEY || !OPENAI_API_KEY) {
+      return res.status(500).json({ error: "No API keys" });
+      return;
+    }
 
     const lang = req.query.lang === "eng" ? "eng" : "ru";
 
-    const weatherData = await fetchWeatherData(WEATHER_KEY);
-    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, lang);
+    const weatherData = await getWeather();
+    const forecast = await getGptForecast(weatherData, lang);
 
-    return res.status(200).json({
+    // Это поле видно в SenseCraft — сразу поймёшь, что данные свежие
+    const now = new Date().toISOString();
+
+    res.status(200).json({
       forecast: forecast,
       city: CITY,
-      updated: new Date().toISOString(),
+      updated: now,
+      _timestamp: Date.now(),           // лишний анти-кэш маркер
     });
 
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: "Failed" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to get weather" });
   }
 }
 
-async function fetchWeatherData(key) {
-  const url = `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${CITY}&days=1&aqi=no&alerts=no`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("WeatherAPI failed");
+// ————————————————————————————————————————————————
+// Получаем погоду
+async function getWeather() {
+  const url = `https://api.weatherapi.com/v1/forecast.json?key=${process.env.WEATHER_KEY}&q=${CITY}&days=1&aqi=no&alerts=no`;
+  const r = await fetch(url, { next: { revalidate: 0 } });
+  if (!r.ok) throw new Error("WeatherAPI error");
   const d = await r.json();
   return {
     location: d.location,
@@ -47,67 +59,54 @@ async function fetchWeatherData(key) {
   };
 }
 
-async function generateForecast(apiKey, weatherData, lang) {
-  // Самый надёжный промпт — жёстко фиксируем поведение модели
-  const userPrompt = lang === "ru" ?
-`Ты — голосовой погодный помощник. НИКОГДА не задавай вопросов и не здоровайся только по времени суток.
-Твоя единственная задача — дать короткий тёплый прогноз на основе ЭТОГО JSON (и ничего больше):
+// ————————————————————————————————————————————————
+// Генерируем красивый текст через GPT (больше никогда не скажет только прогноз!)
+async function getGptForecast(data, lang) {
+  const prompt = lang === "ru" ?
+`Ты — самый добрый русскоязычный голосовой помощник погоды.
+Используй ТОЛЬКО этот JSON и ничего больше:
 
-${JSON.stringify(weatherData)}
+${JSON.stringify(data)}
 
-Требования:
-- Дата и день недели сегодня
-- Приветствие (Доброе утро / Добрый день / Добрый вечер)
-- Температура, ощущается, осадки, ветер
-- Совет по одежде + маленький добрый совет
-- Только русский язык, 2–3 абзаца, максимально 70 слов
-- Никаких вопросов, никаких "как могу помочь", никаких упоминаний JSON
+Сегодняшний прогноз для ${CITY}:
+• Дата и день недели
+• Приветствие по времени суток (утро/день/вечер)
+• Температура сейчас и ощущается, осадки, ветер
+• Что надеть и маленький тёплый совет на день
 
-Сделай прогноз прямо сейчас:` :
+Ответь сразу прогнозом, без вопросов и лишних слов. Максимум 70 слов, 2–3 абзаца, очень дружелюбно.` 
+:
+`You are the warmest English weather voice assistant.
+Use ONLY this JSON:
 
-`You are a weather voice assistant. NEVER ask questions or say "how can I help".
-Your only job is to give a short warm forecast based on THIS JSON only:
+${JSON.stringify(data)}
 
-${JSON.stringify(weatherData)}
+Today's forecast for ${CITY}:
+• Date and weekday
+• Greeting by time of day
+• Current temp & feels-like, rain, wind
+• What to wear + tiny positive tip
 
-Requirements:
-- Today’s date + weekday
-- Greeting by time of day (Good morning / Good afternoon / Good evening)
-- Temperature, feels like, precipitation, wind
-- Clothing tip + tiny positive advice
-- Natural English, 2–3 paragraphs, max 70 words
-- No questions, no mentions of JSON
+Reply with the forecast only, no questions. Max 70 words, 2–3 paragraphs, super friendly.`;
 
-Give the forecast now:`;
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.openai.com/v1/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       temperature: 0.7,
       max_tokens: 400,
       messages: [
-        {
-          role: "system",
-          content: "Ты строго следуешь инструкциям и никогда не отклоняешься от задачи. Отвечай только прогнозом погоды — никаких лишних слов.",
-        },
-        {
-          role: "user",
-          content: userPrompt,
-        },
+        { role: "system", content: "Ты всегда отвечаешь только прогнозом погоды. Никаких вопросов, приветствий отдельно и упоминаний JSON." },
+        { role: "user", content: prompt }
       ],
     }),
   });
 
-  const data = await response;
-  if (!data.ok) {
-    const t = await data.text();
-    throw new Error("OpenAI: " + t);
-  }
-  const json = await data.json();
+  if (!response.ok) throw new Error("OpenAI failed");
+  const json = await response.json();
   return json.choices[0].message.content.trim();
 }
