@@ -1,41 +1,47 @@
 // /api/weather.js
+// Погода для Эдинбурга с красивым голосовым прогнозом через GPT-4o-mini
+// Работает на Vercel без кэширования (обновляется каждый запрос)
+
 const CITY = "Edinburgh";
 
 const PROMPTS = {
   ru: (weatherData) => `
-Представь, что ты — дружелюбный голосовой помощник. Используя переданный JSON с погодой (${JSON.stringify(weatherData)}), сделай следующее: 
-1. Укажи дату и день недели. 
-2. Начни с приветствия по времени суток. 
-3. Составь короткий, тёплый прогноз: температура, осадки, ветер и важные особенности, метрические. 
-4. Дай совет по одежде и при желании небольшой дневной совет. 
-Выведи один связный дружелюбный текст по-русски, подели на смысловые абзацы, до 70 слов.
+Представь, что ты — очень дружелюбный русскоязычный голосовой помощник. 
+Используя только этот JSON с погодой (${JSON.stringify(weatherData)}), сделай:
+1. Укажи сегодняшнюю дату и день недели.
+2. Приветствие по времени суток (утро/день/вечер/ночь).
+3. Короткий тёплый прогноз: температура, осадки, ветер, ощущается.
+4. Совет по одежде и маленький добрый совет на день.
+Всё на русском, один связный текст, 2–3 абзаца, максимум 70 слов.
 `.trim(),
+
   eng: (weatherData) => `
-Imagine that you are a friendly voice assistant who gives weather forecasts to people in simple, kind language. Use the provided JSON weather data (${JSON.stringify(weatherData)}) to:
-1. Determine the date and day of the week and include them in the forecast text.
-2. Begin the message with a greeting appropriate to the time of day.
-3. Provide a brief and pleasant forecast for the day, including temperature, precipitation, wind, and other important factors. Use only metric units.
-4. Provide clothing advice based on the weather.
-5. Mention if changes in the weather are expected during the day.
-Express the result as a single, coherent text in english, 2-3 paragraphs long.
-`.trim()
+You are a super friendly English-speaking weather voice assistant.
+Using only the provided JSON (${JSON.stringify(weatherData)}):
+1. Include today’s date and weekday.
+2. Start with a time-of-day greeting (morning, afternoon, evening).
+3. Give a short, kind daily forecast: temperature, precipitation, wind, feels-like.
+4. Suggest what to wear and add a tiny positive tip for the day.
+Answer in natural English, 2–3 paragraphs, warm and caring tone.
+`.trim(),
 };
 
 export default async function handler(req, res) {
+  // Отключаем любой кэш Vercel/CDN раз и навсегда
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+
   try {
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
     if (!WEATHER_KEY || !OPENAI_API_KEY) {
-      return res.status(500).json({ error: "API keys are not configured" });
+      return res.status(500).json({ error: "Missing API keys (WEATHER_KEY or OPENAI_API_KEY)" });
     }
 
-    const language = req.query.lang || 'ru';
-    if (!PROMPTS[language]) {
-      return res.status(400).json({
-        error: `Unsupported language: ${language}. Available: ru, eng`
-      });
-    }
+    const language = req.query.lang === "eng" ? "eng" : "ru"; // по умолчанию русский
 
     const weatherData = await fetchWeatherData(WEATHER_KEY);
     const forecast = await generateForecast(OPENAI_API_KEY, weatherData, language);
@@ -43,24 +49,28 @@ export default async function handler(req, res) {
     return res.status(200).json({ forecast });
   } catch (err) {
     console.error("Ошибка в /api/weather:", err);
-    return res.status(500).json({
-      error: err.message || "An unexpected error occurred"
-    });
+    return res.status(500).json({ error: "Не удалось получить прогноз" });
   }
 }
 
 async function fetchWeatherData(apiKey) {
-  const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
-  const response = await fetch(url);
+  const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(
+    CITY
+  )}&days=1&aqi=no&alerts=no&lang=ru`;
+
+  const response = await fetch(url, { next: { revalidate: 0 } }); // ещё один предохранитель от кэша
+
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`WeatherAPI error: ${response.status} — ${errorText}`);
+    const text = await response.text();
+    throw new Error(`WeatherAPI ${response.status}: ${text}`);
   }
+
   const data = await response.json();
+
   return {
     location: data.location,
     current: data.current,
-    forecast: data.forecast.forecastday[0]
+    forecast: data.forecast.forecastday[0],
   };
 }
 
@@ -68,31 +78,44 @@ async function generateForecast(apiKey, weatherData, language) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
+      "Content-Type: "application/json",
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",                     // работает
+      model: "gpt-4o-mini",
+      temperature: 0.7,
+      max_completion_tokens: 500,
       messages: [
         {
           role: "system",
-          content: "Ты дружелюбный и заботливый погодный помощник."
+          content: language === "ru"
+            ? "Ты самый добрый и заботливый русскоязычный погодный помощник."
+            : "You are the kindest and most caring English weather voice assistant.",
         },
         {
           role: "user",
-          content: PROMPTS[language](weatherData)
-        }
+          content: PROMPTS[language](weatherData),
+        },
       ],
-      max_completion_tokens: 500              // ← правильный параметр для всей линейки GPT-5
-      // temperature НЕ поддерживается в gpt-5-nano
-    })
+    }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI API error: ${response.status} — ${errorText}`);
+    const text = await response.text();
+    throw new Error(`OpenAI API error ${response.status}: ${text}`);
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "Прогноз недоступен";
+  const json = await response.json();
+  return json.choices?.[0]?.message?.content?.trim() || "Прогноз временно недоступен";
 }
+
+// Это важно для Vercel — указываем, что функция динамическая и не должна кэшироваться
+export const config = {
+  api: {
+    // Отключаем bodyParser (не нужен) и включаем внешние запросы
+    bodyParser: false,
+  },
+  // Самый надёжный способ сказать Vercel: НЕ КЭШИРУЙ ЭТУ ФУНКЦИЮ НИКОГДА
+  runtime: "nodejs18.x", // или nodejs20.x
+  // Если используешь Edge Runtime — удали эту строку и оставь только Node.js
+};
