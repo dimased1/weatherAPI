@@ -1,55 +1,89 @@
 // /api/weather.js
-// Поведение как у любого нормального публичного API — всегда свежие данные
+// Погода в Эдинбурге + голосовой прогноз от GPT-4o-mini
+// 100% без кэша Vercel, всегда свежие данные
 
 const CITY = "Edinburgh";
 
-const PROMPTS = { /* твои промпты без изменений, оставляем как у тебя были */ };
+// ПРОМПТЫ — теперь просто строки, а не функции (это и было причиной ошибки!)
+const PROMPTS = {
+  ru: `
+Ты — самый добрый русскоязычный голосовой помощник. 
+Используя ТОЛЬКО этот JSON с погодой: {WEATHER_JSON}
+
+Сделай короткий тёплый прогноз на сегодня:
+— Укажи дату и день недели
+— Приветствие по времени суток
+— Температура, осадки, ветер, ощущается как
+— Совет по одежде + маленький добрый совет на день
+
+Один связный текст на русском, 2–3 абзаца, до 70 слов, очень дружелюбно.
+`.trim(),
+
+  eng: `
+You are the kindest English-speaking weather voice assistant.
+Using ONLY this weather JSON: {WEATHER_JSON}
+
+Give a short, warm daily forecast:
+— Include today’s date and weekday
+— Greeting based on time of day
+— Temperature, precipitation, wind, feels-like
+— Clothing advice + tiny positive tip
+
+Natural English, 2–3 paragraphs, super friendly tone.
+`.trim(),
+};
+
+export const dynamic = "force-dynamic"; // Vercel: НЕ КЭШИРУЙ НИКОГДА
+export const revalidate = 0;
 
 export default async function handler(req, res) {
-  // Самое главное — эти 3 строки заставляют Vercel вести себя как обычный публичный API
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  // Полностью убираем любой кэш Vercel, Cloudflare и всех прокси
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
-  // Эта строка — секретное оружие. Vercel полностью отключает свой CDN кэш
   res.setHeader("Vercel-CDN-Cache-Control", "no-store");
   res.setHeader("CDN-Cache-Control", "no-store");
-
-  // Дополнительно: делаем так, чтобы ответ отличался для разных клиентов
-  // (некоторые умные прокси всё равно пытаются кэшировать, если ответ 100% одинаковый)
-  res.setHeader("Vary", "User-Agent, Accept, Accept-Encoding");
+  res.setHeader("Vary", "*"); // на всякий случай
 
   try {
     const WEATHER_KEY = process.env.WEATHER_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
     if (!WEATHER_KEY || !OPENAI_API_KEY) {
-      return res.status(500).json({ error: "API keys missing" });
+      return res.status(500).json({ error: "API keys not configured" });
     }
 
     const lang = req.query.lang === "eng" ? "eng" : "ru";
 
     const weatherData = await fetchWeatherData(WEATHER_KEY);
-    const forecast = await generateForecast(OPENAI_API_KEY, weatherData, lang);
 
-    // Ещё один финальный удар по кэшу — добавляем уникальный заголовок
-    res.setHeader("X-Generated-At", new Date().toISOString());
+    // ← ВАЖНО: вставляем JSON прямо в промпт как строку
+    const prompt = PROMPTS[lang].replace("{WEATHER_JSON}", JSON.stringify(weatherData));
 
-    return res.status(200).json({ 
+    const forecast = await generateForecast(OPENAI_API_KEY, prompt, lang, prompt);
+
+    res.setHeader("X-Updated-At", new Date().toISOString());
+
+    return res.status(200).json({
       forecast,
-      updated: new Date().toISOString(),  // удобно для отладки на клиенте
+      city: CITY,
+      updated: new Date().toISOString(),
     });
-
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Failed to fetch weather" });
+  } catch (error) {
+    console.error("Weather API error:", error);
+    return res.status(500).json({ error: "Не удалось получить прогноз погоды" });
   }
 }
 
-// === Остальные функции без изменений ===
-async function fetchWeatherData(apiKey) {
-  const url = `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${CITY}&days=1&aqi=no&alerts=no`;
+async function fetchWeatherData(key) {
+  const url = `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${encodeURIComponent(CITY)}&days=1&aqi=no&alerts=no`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error("WeatherAPI error");
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`WeatherAPI ${res.status}: ${text}`);
+  }
+
   const data = await res.json();
   return {
     location: data.location,
@@ -58,7 +92,7 @@ async function fetchWeatherData(apiKey) {
   };
 }
 
-async function generateForecast(apiKey, weatherData, language) {
+async function generateForecast(apiKey, language, prompt) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -70,23 +104,25 @@ async function generateForecast(apiKey, weatherData, language) {
       temperature: 0.8,
       max_tokens: 500,
       messages: [
-        { role: "system", content: "Ты самый добрый погодный помощник." },
-        { role: "user", content: PROMPTS[language](weatherData) },
+        {
+          role: "system",
+          content: language === "ru"
+            ? "Ты самый заботливый русскоязычный погодный помощник в мире."
+            : "You are the most caring English weather voice assistant.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
       ],
     }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`OpenAI error: ${res.status} ${text}`);
+    throw new Error(`OpenAI error ${res.status}: ${text}`);
   }
 
   const json = await res.json();
-  return json.choices[0].message.content.trim();
+  return json.choices[0]?.message?.content?.trim() || "Прогноз временно недоступен";
 }
-
-// САМОЕ ВАЖНОЕ — эта строчка внизу файла
-// Без неё Vercel всё равно может кэшировать на уровне Edge, даже с заголовками!
-export const dynamic = "force-dynamic";     // Next.js 13+ App Router стиль
-// Если ты на Pages Router — оставь эту строку тоже, она не повредит
-export const revalidate = 0;                 // тоже помогает
