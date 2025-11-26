@@ -1,3 +1,13 @@
-name = "weather"
-main = "src/index.js"
+name = "edinburgh-forecast"
 compatibility_date = "2025-11-26"
+
+[vars]
+# ничего не надо, ключи берутся из секретов
+
+[[kv_namespaces]]
+binding = "KV"
+id = "fd0c18e84a2e4744bc184916c9b84613"
+
+# ВАЖНО: обновление каждые 30 минут
+[[triggers]]
+schedule = "*/30 * * * *"
