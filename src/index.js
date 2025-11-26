@@ -99,7 +99,7 @@ async function getGptForecast(weatherData, lang, env) {
        Check hourly forecast for significant changes. Important - give advice on clothing. And in case of sudden weather changes, let them know. If it's nighttime now, give advice for tomorrow. If there's space, you can just give some good advice in general.  
        Data: ${JSON.stringify(weatherData)}`
     : `Короткий тёплый прогноз погоды на русском (2–3 абзаца, 70–100 слов).
-       Приветствие по времени суток, сегодня: день недели и число, температура и «ощущается», ветер, осадки.
+       Приветствие по времени суток, сегодня: день недели и число, температура и «ощущается», ветер, осадки. Используй °C и км/час.
        Посмотри почасовой прогноз — будут ли резкие изменения. Важно - дай совет по одежде. И в случае резких перепадов погоды сообщи об этом. Если сейчас ночь, дай совет на завтра. Если есть место - можешь дать просто хороший совет в общем. 
        Данные: ${JSON.stringify(weatherData)}`;
 
