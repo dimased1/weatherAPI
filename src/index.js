@@ -137,7 +137,7 @@ async function getGptForecast(weatherData, lang, env) {
         temperature: 0.7,
         max_tokens: 300,
         messages: [
-          { role: "system", content: "You are a kind meteorologist. Reply ONLY with the forecast text in Russian. No JSON, no code, no explanations." },
+          { role: "system", content: "You are a kind meteorologist. Reply ONLY with the forecast text. No JSON, no code, no explanations." },
           { role: "user", content: prompt },
         ],
       }),
