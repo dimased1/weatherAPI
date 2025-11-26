@@ -1,4 +1,5 @@
-// src/index.js — твой старый код, но теперь на Cloudflare Workers с KV
+// src/index.js — твой код, но теперь на Cloudflare Workers + KV (OpenAI, как ты просил)
+
 const CITY = "Edinburgh";
 const CACHE_TTL = 180; // 3 минуты
 
@@ -13,7 +14,6 @@ export default {
     };
 
     try {
-      // 1. Параллельно: свежая погода + кэш из KV
       const [weather, cached] = await Promise.all([
         getWeather(env),
         env.KV.get(`forecast:${lang}`, { type: "json" }),
@@ -21,60 +21,70 @@ export default {
 
       let forecast = cached?.text;
 
-      // 2. Если кэша нет или он старый — запускаем GPT в фоне
-      if (!cached || Date.now() / 1000 - (cached.ts || 0) > 120) {
+      // Если кэша нет или он старый — запускаем GPT в фоне
+      if (!cached || Date.now() / 1000 - (cached?.ts || 0) > 120) {
         ctx.waitUntil(updateGptInBackground(weather, lang, env));
 
-        // На первый запрос — даём красивую заглушку (как у тебя было)
+        // На первый запрос — красивая заглушка с приветствием по времени
         if (!forecast) {
           const hour = new Date().getHours();
-          forecast = lang === "eng"
-            ? `Good \( {hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}! It's currently \){hour < 18 ? "mild" : "cool"} in Edinburgh. Dress warm and have a wonderful day!`
-            : `Добрый \( {hour < 12 ? "утро" : hour < 18 ? "день" : "вечер"}! В Эдинбурге сейчас \){hour < 18 ? "прохладно" : "холодно"}. Одевайтесь тепло и отличного вам дня!`;
+          forecast =
+            lang === "eng"
+              ? `Good \( {hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}! It's currently \){hour < 18 ? "mild" : "cool"} in Edinburgh. Dress warm and have a wonderful day!`
+              : `Добрый \( {hour < 12 ? "утро" : hour < 18 ? "день" : "вечер"}! В Эдинбурге сейчас \){hour < 18 ? "прохладно" : "холодно"}. Одевайтесь тепло и отличного вам дня!`;
         }
       }
 
-      return new Response(JSON.stringify({
-        forecast,
-        city: CITY,
-        updated: new Date().toISOString(),
-        _ts: Date.now(),
-      }), { headers });
-
+      return new Response(
+        JSON.stringify({
+          forecast,
+          city: CITY,
+          updated: new Date().toISOString(),
+          _ts: Date.now(),
+        }),
+        { headers }
+      );
     } catch (error) {
       console.error("FATAL:", error);
 
       const hour = new Date().getHours();
-      const fallback = lang === "eng"
-        ? `Good evening! It's currently ${hour < 18 ? "mild" : "cool"} in Edinburgh. Dress warm and have a wonderful day!`
-        : `Добрый вечер! В Эдинбурге сейчас ${hour < 18 ? "прохладно" : "холодно"}. Одевайтесь тепло и отличного вам дня!`;
+      const fallback =
+        lang === "eng"
+          ? `Good evening! It's currently ${hour < 18 ? "mild" : "cool"} in Edinburgh. Dress warm and have a wonderful day!`
+          : `Добрый вечер! В Эдинбурге сейчас ${hour < 18 ? "прохладно" : "холодно"}. Одевайтесь тепло и отличного вам дня!`;
 
-      return new Response(JSON.stringify({
-        forecast: fallback,
-        city: CITY,
-        updated: new Date().toISOString(),
-        error: "gpt_temp_offline",
-      }), { status: 200, headers });
+      return new Response(
+        JSON.stringify({
+          forecast: fallback,
+          city: CITY,
+          updated: new Date().toISOString(),
+          error: "gpt_temp_offline",
+        }),
+        { status: 200, headers }
+      );
     }
   },
 };
 
-// ─────── Фоновая задача: обновляем GPT и пишем в KV ───────
+// Фоновая задача — не блокирует ответ
 async function updateGptInBackground(weather, lang, env) {
   const forecast = await getGptForecast(weather, lang, env);
-  await env.KV.put(`forecast:${lang}`, JSON.stringify({
-    text: forecast,
-    ts: Date.now() / 1000
-  }), { expirationTtl: CACHE_TTL + 60 });
+  await env.KV.put(
+    `forecast:${lang}`,
+    JSON.stringify({ text: forecast, ts: Date.now() / 1000 }),
+    { expirationTtl: CACHE_TTL + 60 }
+  );
 }
 
-// ─────── Получаем погоду (точно как у тебя) ───────
+// ─────── Погода (точно как у тебя) ───────
 async function getWeather(env) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=\( {env.WEATHER_KEY}&q= \){CITY}&days=1&aqi=no&alerts=no`;
   const r = await fetch(url, { cache: "no-store" });
 
   if (!r.ok) {
-    return { current: { temp_c: 10, feelslike_c: 8, condition: { text: "облачно" }, wind_kph: 15 } };
+    return {
+      current: { temp_c: 10, feelslike_c: 8, condition: { text: "облачно" }, wind_kph: 15 },
+    };
   }
 
   const d = await r.json();
@@ -85,16 +95,16 @@ async function getWeather(env) {
   };
 }
 
-// ─────── GPT-прогноз (твой оригинальный, без изменений) ───────
+// ─────── OpenAI GPT-4o-mini (твой оригинальный код) ───────
 async function getGptForecast(data, lang = "ru", env) {
-  const prompt = lang === "eng" ?
-`Короткий тёплый прогноз на основе этого JSON (только факты из JSON):
+  const prompt =
+    lang === "eng"
+      ? `Короткий тёплый прогноз на основе этого JSON (только факты из JSON):
 
 ${JSON.stringify(data)}
 
 Просто дай прогноз на английском: приветствие по времени суток, температура, ощущается, ветер, осадки, что надеть. 2–3 предложения, очень дружелюбно. Без вопросов и без JSON в ответе.`
-:
-`Короткий тёплый прогноз на основе этого JSON:
+      : `Короткий тёплый прогноз на основе этого JSON:
 
 ${JSON.stringify(data)}
 
@@ -105,7 +115,7 @@ ${JSON.stringify(data)}
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
@@ -113,7 +123,7 @@ ${JSON.stringify(data)}
         max_tokens: 300,
         messages: [
           { role: "system", content: "Ты отвечаешь ТОЛЬКО прогнозом погоды. Никаких вопросов, никакого JSON, никаких лишних слов." },
-          { role: "user", content: prompt }
+          { role: "user", content: prompt },
         ],
       }),
     });
@@ -122,97 +132,10 @@ ${JSON.stringify(data)}
 
     const json = await response.json();
     return json.choices?.[0]?.message?.content?.trim() || "Приятная погода сегодня!";
-
   } catch (e) {
     console.error("GPT упал, возвращаем заглушку");
     return lang === "eng"
       ? "It’s a lovely day in Edinburgh! Stay warm and smile!"
       : "В Эдинбурге сегодня прекрасная погода! Улыбнитесь и оденьтесь по погоде";
-  }
-}      }
-
-      return new Response(JSON.stringify({
-        forecast,
-        city: CITY,
-        temp_c: weather.current.temp_c ?? 10,
-        feels_like_c: weather.current.feelslike_c ?? 8,
-        condition: weather.current.condition?.text || "cloudy",
-        wind_kph: weather.current.wind_kph ?? 15,
-        updated: new Date().toISOString(),
-        _ts: Date.now(),
-        _source: cached ? "kv" : "fallback",
-      }), { headers });
-
-    } catch (e) {
-      console.error("Fatal:", e);
-      return new Response(JSON.stringify({
-        forecast: lang === "eng"
-          ? "Good evening from Edinburgh!"
-          : "Добрый вечер из Эдинбурга!",
-        city: CITY,
-        updated: new Date().toISOString(),
-        error: "offline",
-      }), { status: 200, headers });
-    }
-  },
-};
-
-// Фоновая задача — не блокирует ответ!
-async function updateForecastInBackground(weather, lang, env) {
-  const text = await generateGptForecast(weather, lang, env);
-  await env.KV.put(`forecast:${lang}`, JSON.stringify({ text, ts: Date.now() / 1000 }), {
-    expirationTtl: CACHE_TTL + 60,
-  });
-}
-
-// ─────── Погода ───────
-async function getWeather(env) {
-  const url = `https://api.weatherapi.com/v1/forecast.json?key=\( {env.WEATHER_KEY}&q= \){CITY}&days=1&aqi=no&alerts=no`;
-  const res = await fetch(url);
-  if (!res.ok) return { current: { temp_c: 10, feelslike_c: 8, condition: { text: "облачно" }, wind_kph: 15 }};
-  const data = await res.json();
-  return data;
-}
-
-// ─────── DeepSeek (или OpenAI — просто поменяй URL и model) ───────
-async function generateGptForecast(data, lang, env) {
-  const prompt = lang === "eng" ?
-`Короткий тёплый прогноз на основе этого JSON (только факты):
-
-${JSON.stringify(data)}
-
-Дай прогноз на английском: приветствие по времени суток, температура, ощущается, ветер, осадки, что надеть. 2–3 предложения, очень дружелюбно. Без JSON.`
-:
-`Короткий тёплый прогноз на основе этого JSON:
-
-${JSON.stringify(data)}
-
-Дай прогноз на русском: приветствие по времени суток, температура и ощущается, осадки, ветер, совет по одежде. 2–3 абзаца, макс 70 слов, очень по-доброму. Без JSON.`;
-
-  try {
-    const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.DEEPSEEK_API_KEY || env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: env.DEEPSEEK_API_KEY ? "deepseek-chat" : "gpt-4o-mini",
-        temperature: 0.7,
-        max_tokens: 300,
-        messages: [
-          { role: "system", content: "Отвечай ТОЛЬКО текстом прогноза погоды." },
-          { role: "user", content: prompt }
-        ],
-      }),
-    });
-
-    if (!res.ok) throw new Error("LLM error");
-    const json = await res.json();
-    return json.choices?.[0]?.message?.content?.trim() || "Приятная погода!";
-  } catch (e) {
-    return lang === "eng"
-      ? "Lovely weather in Edinburgh!"
-      : "В Эдинбурге сегодня хорошая погода!";
   }
 }
