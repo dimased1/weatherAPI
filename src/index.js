@@ -1,6 +1,6 @@
 // src/index.js
 const CITY = "Edinburgh";
-const UPDATE_INTERVAL = 30 * 60; // 30 минут в секундах
+const UPDATE_INTERVAL = 300 * 60; // 30 минут в секундах
 
 export default {
   // Обычные HTTP-запросы — всегда мгновенные (берём из KV)
@@ -21,7 +21,7 @@ export default {
       };
 
       await env.KV.put(`forecast:${lang}`, JSON.stringify(payload), {
-        expirationTtl: UPDATE_INTERVAL + 300, // +5 минут на всякий случай
+        expirationTtl: UPDATE_INTERVAL + 900, // +5 минут на всякий случай
       });
 
       return new Response(
@@ -87,8 +87,8 @@ async function getWeather(env) {
 async function getGptForecast(data, lang, env) {
   const prompt =
     lang === "eng"
-      ? `Give a very short, warm and friendly weather forecast in English (2–3 sentences max). Include time-of-day greeting, current temperature + feels like, wind, precipitation chance and clothing tip.\n\n${JSON.stringify(data)}`
-      : `Короткий добрый прогноз погоды на русском (2–3 предложения, максимум 70 слов). Приветствие по времени суток, температура + ощущается, ветер, осадки, совет что надеть.\n\n${JSON.stringify(data)}`;
+      ? `A brief, friendly weather forecast in Russian (2–3 paragraphs, 70 to 100 words). Greeting according to the time of day, today's date (day of the week), temperature + feels like, wind, precipitation. Check the hourly forecast to see if there will be any significant changes. Write some advice on what to wear. If you wish, you can add some useful advice.\n\n${JSON.stringify(data)}`
+      : `Короткий добрый прогноз погоды на русском (2–3 абзаца предложения, от 70 до 100 слов). Приветствие по времени суток, сегодняшний день(число день недели) температура + ощущается, ветер, осадки. Посмотри часовой прогноз, не будут ли сильных изменений. Напиши совет что надеть. Если есть желание - какой то полезный совет.\n\n${JSON.stringify(data)}`;
 
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
