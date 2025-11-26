@@ -1,76 +1,75 @@
-# Weather Forecast API
+# Friendly Weather Forecast API
+**Instant • Any city • Russian + English • Cloudflare Workers**
 
-Этот API предоставляет дружелюбный и легко читаемый прогноз погоды для города **Эдинбург** на основе данных WeatherAPI и генерации текста с помощью DeepSeek. Прогноз доступен на русском и английском языках.
+Fast, warm, human-like weather forecasts for any city in the world, served instantly from the edge.
 
-## Особенности
+## Tech Stack
+- **Platform** — Cloudflare Workers (edge, no cold starts)
+- **AI** — OpenAI `gpt-4o-mini` (generates friendly natural text)
+- **Weather data** — WeatherAPI.com (current weather + hourly forecast)
+- **Caching** — Cloudflare Workers KV (instant responses after first request)
 
-* Получение прогноза на **сегодня** с часовыми данными.
-* Прогноз формируется в виде **дружелюбного текста**, включающего:
+## Features
+- Works with any city name or coordinates (`?city=55.7558,37.6173`)
+- Two languages: Russian (`ru` — default) and English (`eng`)
+- Default city (Edinburgh) automatically refreshed every 2 hours via Cloudflare cron
+- All other cities generated on first request → cached for ~2 hours
+- Returns two timestamps: human-readable + ISO 8601
 
-  * Дату и день недели.
-  * Приветствие в зависимости от времени суток.
-  * Краткий обзор температуры, осадков, ветра и других особенностей.
-  * Рекомендации по одежде.
-  * Упоминание возможных изменений погоды в течение дня.
-* Поддержка двух языков: **ru** (русский) и **eng** (английский).
-
-## Требования
-
-* Node.js v18+
-* API ключи:
-
-  * `WEATHER_KEY` для WeatherAPI.
-  * `DEEPSEEK_API_KEY` для DeepSeek.
-
-## Установка
-
-1. Склонировать репозиторий или добавить файл `/api/weather.js` в ваш проект Next.js.
-2. Установить зависимости:
-
-```bash
-npm install node-fetch
-```
-
-3. Добавить в `.env` файл ключи API:
-
-```env
-WEATHER_KEY=ваш_ключ_WeatherAPI
-DEEPSEEK_API_KEY=ваш_ключ_DeepSeek
-```
-
-## Использование
-
-### Запрос
-
-HTTP GET к эндпоинту:
-
-```
-/api/weather?lang=ru
-/api/weather?lang=eng
-```
-
-* `lang` — язык прогноза. По умолчанию `ru`.
-* Поддерживаемые значения: `ru`, `eng`.
-
-### Пример ответа
-
+### Example usage (after you deploy)
+https://your-worker.workers.dev/
+https://your-worker.workers.dev/?city=Москва
+https://your-worker.workers.dev/?city=London&lang=eng
+text### JSON response example
 ```json
 {
-  "forecast": "Доброе утро! Сегодня в Эдинбурге ожидается прохладная погода с температурой около 10°C. Возможен лёгкий дождь после обеда. Ветер северо-западный, 15 км/ч. Рекомендуется надеть лёгкую куртку и взять зонт. Вечером температура может немного снизиться, так что теплая одежда будет кстати."
+  "forecast": "Добрый вечер! Сегодня в Москве прохладно, −2 °C, ощущается как −7 °C…",
+  "city": "Moscow",
+  "updated": "26 ноя 19:15",
+  "updated_iso": "2025-11-26T16:15:42.000Z"
 }
-```
+Setup & Deployment
+1. Create KV namespace
+Bashwrangler kv:namespace create WEATHER_KV
+wrangler kv:namespace create WEATHER_KV --preview=false
+Add to wrangler.toml:
+toml[[kv_namespaces]]
+binding = "KV"                     # ← must be exactly "KV" (used in code as env.KV)
+id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+preview_id = "yyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+2. Add secrets (required!)
+Bashwrangler secret put WEATHER_KEY       # ← your key from https://www.weatherapi.com
+wrangler secret put OPENAI_API_KEY    # ← your OpenAI key (gpt-4o-mini recommended)
+3. Enable cron trigger — every 2 hours
+In wrangler.toml:
+tomltriggers = { crons = ["0 */2 * * *"] }   # every even hour UTC
+4. Deploy
+Bashwrangler deploy
+Done! Your personal weather API is now live and uses only your own keys and limits.
 
-## Ошибки
+Русский раздел
+Дружелюбный прогноз погоды
+Cloudflare Workers + OpenAI gpt-4o-mini + WeatherAPI.com
+Что используется
 
-* `500` — проблемы с API ключами или внутренние ошибки.
-* `400` — неподдерживаемый язык (`lang`).
+Cloudflare Workers — мгновенные ответы по всему миру
+OpenAI gpt-4o-mini — тёплый, человеческий текст прогноза
+WeatherAPI.com — точные текущие данные и почасовой прогноз
+Cloudflare KV — кэширование (после первого запроса < 50 мс)
 
-## Структура кода
+Возможности
 
-* `fetchWeatherData(apiKey)` — получает данные о погоде с WeatherAPI.
-* `generateForecast(apiKey, weatherData, language)` — генерирует текст прогноза через DeepSeek.
-* `PROMPTS` — шаблоны подсказок для генерации прогноза на разных языках.
+Любой город или координаты
+Русский и английский языки
+Эдинбург обновляется автоматически каждые 2 часа
+Остальные города — по первому запросу, потом из кэша
 
-## Лицензия
+Настройка (обязательно!)
 
-MIT
+Создать KV и привязать как binding = "KV"
+Добавить секреты:Bashwrangler secret put WEATHER_KEY
+wrangler secret put OPENAI_API_KEY
+Включить крон каждые 2 часа
+wrangler deploy
+
+Готово — твой личный погодный API работает только на твоих ключах.
