@@ -7,28 +7,30 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const lang = url.searchParams.get("lang") === "eng" ? "eng" : "ru";
-
     let cached = await env.KV.get(`forecast:${lang}`, { type: "json" });
 
     // Если кэша ещё нет вообще — делаем первый прогноз синхронно (только один раз после деплоя)
     if (!cached) {
       const weather = await getWeather(env);
       const forecast = await getGptForecast(weather, lang, env);
-
       const payload = {
         text: forecast,
         ts: Date.now() / 1000,
       };
-
       await env.KV.put(`forecast:${lang}`, JSON.stringify(payload), {
-        expirationTtl: UPDATE_INTERVAL + 900, // +5 минут на всякий случай
+        expirationTtl: UPDATE_INTERVAL + 900, // +15 минут на всякий случай
       });
-
       return new Response(
         JSON.stringify({
           forecast,
           city: CITY,
-          updated: new Date().toISOString(),
+          updated: new Date().toLocaleString("ru-RU", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).replace(/(\d+) (\w+)\.?, (\d{2}:\d{2})/, "$1 $2 $3"), // 11 дек 22:00
         }),
         { headers: { "Content-Type": "application/json" } }
       );
@@ -39,7 +41,13 @@ export default {
       JSON.stringify({
         forecast: cached.text,
         city: CITY,
-        updated: new Date(cached.ts * 1000).toISOString(),
+        updated: new Date(cached.ts * 1000).toLocaleString("ru-RU", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).replace(/(\d+) (\w+)\.?, (\d{2}:\d{2})/, "$1 $2 $3"), // 11 дек 22:00
       }),
       { headers: { "Content-Type": "application/json" } }
     );
@@ -53,7 +61,6 @@ export default {
 
 async function updateBothForecasts(env) {
   const weather = await getWeather(env);
-
   const tasks = ["ru", "eng"].map(async (lang) => {
     const forecast = await getGptForecast(weather, lang, env);
     await env.KV.put(
@@ -62,7 +69,6 @@ async function updateBothForecasts(env) {
       { expirationTtl: UPDATE_INTERVAL + 300 }
     );
   });
-
   await Promise.all(tasks);
 }
 
@@ -107,9 +113,7 @@ async function getGptForecast(data, lang, env) {
         ],
       }),
     });
-
     if (!res.ok) throw new Error(res.status);
-
     const json = await res.json();
     return json.choices?.[0]?.message?.content?.trim() || (lang === "eng" ? "Lovely weather today!" : "Прекрасная погода!");
   } catch (e) {
