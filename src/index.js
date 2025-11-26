@@ -1,102 +1,82 @@
 // src/index.js
-// Weather Forecast Worker (Cloudflare Workers)
-// Instantly serves friendly human-like forecasts for ANY city in Russian or English
-// Powered by WeatherAPI.com + OpenAI gpt-4o-mini + Cloudflare KV caching
-// Default city: Edinburgh | Update interval: every 2 hours
+// Friendly Weather Forecast Worker
+// Any city • Russian + English • Instant from KV • Updated every 2 hours
 
-const DEFAULT_CITY = "Edinburgh";                 // Fallback and cron-updated city
-const UPDATE_INTERVAL = 2 * 60 * 60;               // 2 hours in seconds
-const CACHE_TTL_EXTRA = 20 * 60;                   // Extra cache time buffer (20 min)
+const DEFAULT_CITY = "Edinburgh";
+const UPDATE_INTERVAL = 2 * 60 * 60;        // 2 hours in seconds
+const CACHE_BUFFER = 20 * 60;               // extra cache time (20 min)
 
-/**
- * Main HTTP handler — always fast thanks to KV cache
- */
 export default {
+  // HTTP requests — always instant
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // User can override city and language via query params
+    // User-defined city and language
     const rawCity = url.searchParams.get("city")?.trim();
-    const city = rawCity && rawCity.length > 0
-      ? sanitizeCity(rawCity)          // Basic protection against garbage input
-      : DEFAULT_CITY;
-
+    const city = rawCity ? sanitizeCity(rawCity) : DEFAULT_CITY;
     const lang = url.searchParams.get("lang") === "eng" ? "eng" : "ru";
 
     const cacheKey = `forecast:${city}:${lang}`;
     const cached = await env.KV.get(cacheKey, { type: "json" });
 
-    // === CACHE HIT → instant response ===
-    if (cached && cached.text && cached.ts) {
+    // Cache hit → instant response
+    if (cached?.text && cached?.ts) {
       return formatResponse(cached.text, city, cached.ts);
     }
 
-    // === CACHE MISS → generate forecast synchronously (only once per city/lang) ===
-    // This happens on first request after deploy or cache expiration
+    // Cache miss → generate once (first request after expiry/deploy)
     const weather = await getWeather(city, env);
     const forecast = await getGptForecast(weather, lang, env);
 
     const payload = {
       text: forecast,
-      ts: Date.now() / 1000,                   // Unix timestamp (seconds)
+      ts: Date.now() / 1000,
     };
 
-    // Cache for ~2 hours + buffer
     await env.KV.put(cacheKey, JSON.stringify(payload), {
-      expirationTtl: UPDATE_INTERVAL + CACHE_TTL_EXTRA,
+      expirationTtl: UPDATE_INTERVAL + CACHE_BUFFER,
     });
 
     return formatResponse(forecast, city, payload.ts);
   },
 
-  /**
-   * Cron trigger — runs every 2 hours
-   * Keeps the default city (Edinburgh) always fresh and warm (no cold start for most users)
-   */
+  // Cron: every 2 hours → keep default city fresh
   async scheduled(event, env, ctx) {
     ctx.waitUntil(updateDefaultCityForecasts(env));
   },
 };
 
-/**
- * Background task: refresh Edinburgh forecasts (ru + eng) every 2 hours
- * This is the only place where we proactively spend OpenAI tokens
- */
+// Background: refresh Edinburgh (ru + eng) every 2 hours
 async function updateDefaultCityForecasts(env) {
   const weather = await getWeather(DEFAULT_CITY, env);
 
-  const tasks = ["ru", "eng"].map(async (lang) => {
-    const forecast = await getGptForecast(weather, lang, env);
-    const payload = { text: forecast, ts: Date.now() / 1000 };
-    const key = `forecast:${DEFAULT_CITY}:${lang}`;
-
-    await env.KV.put(key, JSON.stringify(payload), {
-      expirationTtl: UPDATE_INTERVAL + 15 * 60,
-    });
-  });
-
-  await Promise.all(tasks);
+  await Promise.all(
+    ["ru", "eng"].map(async (lang) => {
+      const forecast = await getGptForecast(weather, lang, env);
+      const payload = { text: forecast, ts: Date.now() / 1000 };
+      await env.KV.put(`forecast:${DEFAULT_CITY}:${lang}`, JSON.stringify(payload), {
+        expirationTtl: UPDATE_INTERVAL + 15 * 60,
+      });
+    })
+  );
 }
 
-/**
- * Fetch current + today forecast from WeatherAPI.com
- */
+// WeatherAPI.com → current + today forecast
 async function getWeather(city, env) {
   const url = `https://api.weatherapi.com/v1/forecast.json?key=${env.WEATHER_KEY}&q=${encodeURIComponent(city)}&days=1&aqi=no&alerts=no`;
 
   try {
     const res = await fetch(url, { timeout: 10000 });
     if (!res.ok) throw new Error(`WeatherAPI ${res.status}`);
-
     const data = await res.json();
+
     return {
       location: data.location,
       current: data.current,
       forecastday: data.forecast.forecastday[0],
     };
   } catch (err) {
-    console.error(`Weather fetch failed for "${city}":`, err.message);
-    // Graceful fallback — never break the worker
+    console.error(`Weather failed for "${city}":`, err.message);
     return {
       current: {
         temp_c: 10,
@@ -109,21 +89,23 @@ async function getWeather(city, env) {
   }
 }
 
-/**
- * Generate friendly forecast text using OpenAI gpt-4o-mini
- */
+// OpenAI → warm human-like forecast
 async function getGptForecast(weatherData, lang, env) {
-  const prompt = lang === "eng"
-    ? `Short warm weather forecast (2–3 paragraphs, 70–100 words).
-       Greetings according to the time of day in the selected city, today: day of the week and date, temperature and ‘feels like’,
-       wind, precipitation. Check the hourly forecast — will there be any sudden changes? You can give advice for today, for tomorrow's weather if it is night now.
-       Be sure to give advice on what to wear + one small useful tip if desired.
+  const isEng = lang === "eng";
+
+  const prompt = isEng
+    ? `Write a short, warm, friendly weather forecast in clear, natural English (2–3 paragraphs, 70–100 words total).
+       Greeting by time of day, today's full date and weekday, current temperature + feels-like, wind, precipitation.
+       Check hourly forecast for significant changes. Important - give advice on clothing. And in case of sudden weather changes, let them know. If it's nighttime now, give advice for tomorrow. If there's space, you can just give some good advice in general.  
        Data: ${JSON.stringify(weatherData)}`
     : `Короткий тёплый прогноз погоды на русском (2–3 абзаца, 70–100 слов).
-       Приветствие по времени суток в выбранном городе, сегодня: день недели и число, температура и «ощущается»,
-       ветер, осадки. Посмотри почасовой прогноз — будут ли резкие изменения. Можно дать совет на день, на завтрашний день по погоде если сейчас ночь.
-       Обязательно совет что надеть + по желанию один маленький полезный совет.
+       Приветствие по времени суток, сегодня: день недели и число, температура и «ощущается», ветер, осадки.
+       Посмотри почасовой прогноз — будут ли резкие изменения. Важно - дай совет по одежде. И в случае резких перепадов погоды сообщи об этом. Если сейчас ночь, дай совет на завтра. Если есть место - можешь дать просто хороший совет в общем. 
        Данные: ${JSON.stringify(weatherData)}`;
+
+  const systemMessage = isEng
+    ? "You are a kind meteorologist. Reply ONLY with the forecast text in natural English. No JSON, no code, no explanations."
+    : "Ты — добрый метеоролог. Отвечай ТОЛЬКО текстом прогноза на русском языке. Никакого JSON, кода и пояснений.";
 
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -137,53 +119,54 @@ async function getGptForecast(weatherData, lang, env) {
         temperature: 0.7,
         max_tokens: 300,
         messages: [
-          { role: "system", content: "You are a kind meteorologist. Reply ONLY with the forecast text. No JSON, no code, no explanations." },
+          { role: "system", content: systemMessage },
           { role: "user", content: prompt },
         ],
       }),
     });
 
     if (!res.ok) throw new Error(`OpenAI ${res.status}`);
-
     const json = await res.json();
     return json.choices?.[0]?.message?.content?.trim() || fallbackForecast(lang);
   } catch (err) {
-    console.error("OpenAI request failed:", err.message);
+    console.error("OpenAI failed:", err.message);
     return fallbackForecast(lang);
   }
 }
 
-/**
- * Simple city name sanitization (prevent KV key injection)
- */
+// Security: prevent KV key injection
 function sanitizeCity(str) {
-  return str.replace(/[^\p{L}\p{N}\s,-]/gu, "").slice(0, 100);
+  return str.replace(/[^\p{L}\p{N}\s,-]/gu, "").slice(0, 100) || DEFAULT_CITY;
 }
 
-/**
- * Fallback text if GPT is down
- */
+// Fallback text if everything is down
 function fallbackForecast(lang) {
   return lang === "eng"
-    ? "Beautiful day ahead — dress comfortably and enjoy!"
-    : "Хороший денёк — одевайтесь по погоде и улыбайтесь!";
+    ? "Lovely weather today — enjoy your day!"
+    : "Хорошая погода сегодня — улыбайтесь!";
 }
 
-/**
- * Format final JSON response with pretty Russian date
- */
+// Final JSON response with two date formats
 function formatResponse(forecastText, city, timestamp) {
   const date = new Date(timestamp * 1000);
-  const updated = date.toLocaleString("ru-RU", {
+
+  const updatedHuman = date.toLocaleString("ru-RU", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).replace(/(\d+) (\w+)\.?, (\d{2}:\d{2})/, "$1 $2 $3"); // → "11 дек 22:00"
+  }).replace(/(\d+) (\w+)\.?, (\d{2}:\d{2})/, "$1 $2 $3"); // → "26 ноя 14:37"
+
+  const updatedIso = date.toISOString(); // → "2025-11-26T14:37:21.000Z"
 
   return new Response(
-    JSON.stringify({ forecast: forecastText, city, updated }, null, 2),
+    JSON.stringify({
+      forecast: forecastText,
+      city,
+      updated: updatedHuman,      // для людей
+      updated_iso: updatedIso,    // для машин, логов, API
+    }, null, 2),
     {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
