@@ -1,76 +1,160 @@
-# Friendly Weather Forecast API
-**Instant • Any city • Russian + English • Cloudflare Workers**
+# 📡 Edinburgh Forecast Worker
 
-Fast, warm, human-like weather forecasts for any city in the world, served instantly from the edge.
+A friendly weather forecast API powered by **Cloudflare Workers**, **KV
+Storage**, **WeatherAPI.com**, and **OpenAI**.\
+Provides warm, human-like forecasts for any city in **English 🇬🇧** or
+**Russian 🇷🇺**.
 
-## Tech Stack
-- **Platform** — Cloudflare Workers (edge execution, no cold starts)
-- **AI** — OpenAI `gpt-4o-mini` (generates friendly, natural-sounding text)
-- **Weather data** — WeatherAPI.com (current weather + hourly forecast)
-- **Caching** — Cloudflare Workers KV (instant responses after first request)
+------------------------------------------------------------------------
 
-## Features
-- Works with any city name or coordinates (`?city=55.7558,37.6173`)
-- Two languages: Russian (`ru` — default) and English (`eng`)
-- Default city (Edinburgh) automatically refreshed every 2 hours via Cloudflare cron
-- All other cities generated on first request → cached for ~2 hours
-- Returns two timestamps: human-readable + ISO 8601 (UTC)
+## ✨ Features
 
-### Example usage (after your own deploy)
-https://your-worker.workers.dev/
-https://your-worker.workers.dev/?city=Москва
-https://your-worker.workers.dev/?city=London&lang=eng
-https://your-worker.workers.dev/?city=55.7558,37.6173&lang=ru
-text### JSON response example
-```json
+-   🌍 Any city supported (safe sanitization)\
+-   ⚡ Instant responses via KV cache (2h + buffer)\
+-   🤖 Uses **OpenAI gpt-4o-mini** for natural forecasts\
+-   ☁️ Weather data from **WeatherAPI.com**\
+-   🔁 Auto-refresh every 2 hours via Cron\
+-   🧥 Clothing advice + warnings about sudden changes\
+-   🌙 Nighttime logic: advice for tomorrow
+
+------------------------------------------------------------------------
+
+## 🛠️ Tech Stack
+
+-   **Cloudflare Workers**\
+-   **Cloudflare KV Storage**\
+-   **OpenAI API**\
+-   **WeatherAPI.com**\
+-   **Cron Triggers**
+
+------------------------------------------------------------------------
+
+## 🌐 API Endpoint
+
+    GET https://<your-worker>.workers.dev/?city=<name>&lang=<ru|eng>
+
+### Parameters
+
+  Name     Description     Default
+  -------- --------------- -----------
+  `city`   Any city name   Edinburgh
+  `lang`   `ru` or `eng`   ru
+
+### Example
+
+    https://edinburgh-forecast.workers.dev/?city=London&lang=eng
+
+------------------------------------------------------------------------
+
+## 📦 Example Response
+
+``` json
 {
-  "forecast": "Добрый вечер! Сегодня в Москве прохладно, −2 °C, ощущается как −7 °C из-за ветра…",
-  "city": "Moscow",
-  "updated": "26 ноя 19:15",
-  "updated_iso": "2025-11-26T16:15:42.000Z"
+  "forecast": "Warm, human-like forecast…",
+  "city": "London",
+  "updated": "26 ноя 14:37",
+  "updated_iso": "2025-11-26T14:37:21.000Z"
 }
-Setup & Deployment
-1. Create KV namespace
-Bashwrangler kv:namespace create WEATHER_KV
-wrangler kv:namespace create WEATHER_KV --preview=false
-Add to wrangler.toml:
-toml[[kv_namespaces]]
-binding = "KV"                     # ← MUST be exactly "KV" — used in code as env.KV
-id = "your-production-id-here"
-preview_id = "your-preview-id-here"
-2. Add secrets (required!)
-Bashwrangler secret put WEATHER_KEY       # ← your key from https://www.weatherapi.com
-wrangler secret put OPENAI_API_KEY    # ← your OpenAI key (gpt-4o-mini works perfectly)
-3. Enable cron — every 2 hours
-In wrangler.toml:
-tomltriggers = { crons = ["0 */2 * * *"] }   # every even hour UTC: 00:00, 02:00, 04:00…
-4. Deploy
-Bashwrangler deploy
-Your personal, private weather API is now live and uses only your own keys and limits.
+```
 
-Русский раздел
-Дружелюбный прогноз погоды
-Cloudflare Workers + OpenAI gpt-4o-mini + WeatherAPI.com
-Что используется
+------------------------------------------------------------------------
 
-Cloudflare Workers — мгновенные ответы по всему миру
-OpenAI gpt-4o-mini — тёплый, живой текст прогноза
-WeatherAPI.com — точные текущие данные и почасовой прогноз
-Cloudflare KV — кэширование (после первого запроса ответ < 50 мс)
+## 🔧 How It Works
 
-Возможности
+### 1. Request → KV Lookup
 
-Любой город мира или координаты
-Русский (по умолчанию) и английский языки
-Эдинбург обновляется автоматически каждые 2 часа
-Все остальные города — генерируются по первому запросу, потом из кэша
+Instant if cached.
 
-Настройка (обязательно!)
+### 2. Cache Miss → WeatherAPI
 
-Создать KV и привязать как binding = "KV"
-Добавить секреты:Bashwrangler secret put WEATHER_KEY
-wrangler secret put OPENAI_API_KEY
-Включить крон каждые 2 часа
-Выполнить wrangler deploy
+Fetches current + daily forecast.
 
-Готово — твой личный погодный API работает только на твоих ключах и лимитах.
+### 3. GPT Summary
+
+Generates 2--3 paragraphs, 70--100 words, clothing tips, warnings.
+
+### 4. KV Store
+
+TTL = 2h + 20 min.
+
+### 5. Cron
+
+Refreshes Edinburgh (ru + eng) every 2 hours.
+
+------------------------------------------------------------------------
+
+## 🔒 Security
+
+-   City sanitization prevents key injection\
+-   No HTML --- pure JSON\
+-   Secrets stored via:\
+
+```{=html}
+<!-- -->
+```
+    wrangler secret put WEATHER_KEY
+    wrangler secret put OPENAI_API_KEY
+
+------------------------------------------------------------------------
+
+## 🚀 Installation & Deployment
+
+### 1. KV Namespace in `wrangler.toml`
+
+``` toml
+[[kv_namespaces]]
+binding = "KV"
+id = "your-kv-id"
+```
+
+### 2. Add Secrets
+
+    wrangler secret put WEATHER_KEY
+    wrangler secret put OPENAI_API_KEY
+
+### 3. Deploy
+
+    wrangler deploy
+
+------------------------------------------------------------------------
+
+# 🇷🇺 Русская версия
+
+# 📡 Edinburgh Forecast Worker
+
+Дружелюбный API прогноза погоды на базе **Cloudflare Workers**, **KV**,
+**WeatherAPI.com** и **OpenAI**.\
+Создаёт естественные человеческие прогнозы для любого города на
+**русском 🇷🇺** или **английском 🇬🇧**.
+
+------------------------------------------------------------------------
+
+## ✨ Возможности
+
+-   🌍 Любой город\
+-   ⚡ Мгновенные ответы из KV (2 часа + буфер)\
+-   🤖 Генерация текста через **gpt-4o-mini**\
+-   ☁️ Данные из WeatherAPI\
+-   🔁 Автообновление каждые 2 часа\
+-   🧥 Советы по одежде\
+-   🌙 Логика для ночи: прогноз на завтра
+
+------------------------------------------------------------------------
+
+## 🌐 API
+
+    GET https://<your-worker>.workers.dev/?city=<город>&lang=<ru|eng>
+
+------------------------------------------------------------------------
+
+## 🚀 Деплой
+
+    wrangler deploy
+
+------------------------------------------------------------------------
+
+## 📁 Project Structure
+
+    /
+    ├─ wrangler.toml
+    └─ src/index.js
