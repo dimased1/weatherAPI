@@ -1,13 +1,15 @@
 name = "edinburgh-forecast"
+main = "src/index.js"                 # ← ЭТО ОБЯЗАТЕЛЬНО было пропущено!
 compatibility_date = "2025-11-26"
 
-[vars]
-# ничего не надо, ключи берутся из секретов
-
+# Твоё KV-пространство (ID берёшь из dashboard → Workers & Pages → KV → твоё namespace)
 [[kv_namespaces]]
 binding = "KV"
-id = "fd0c18e84a2e4744bc184916c9b84613"
+id = "fd0c18e84a2e4744bc184916c9b84613"   # ← замени на свой настоящий ID
 
-# ВАЖНО: обновление каждые 30 минут
-[[triggers]]
-schedule = "*/30 * * * *"
+# Секреты (уже должны быть загружены через wrangler secret put)
+# WEATHER_KEY
+# OPENAI_API_KEY
+
+# ← ВАЖНО: правильный синтаксис для Cron каждые 30 минут
+triggers = [{ schedule = "*/30 * * * *" }]
