@@ -1,4 +1,4 @@
-name = "edinburgh-forecast"
+name = "weather"
 main = "src/index.js"                 # ← ЭТО ОБЯЗАТЕЛЬНО было пропущено!
 compatibility_date = "2025-11-26"
 
